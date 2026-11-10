@@ -19,3 +19,6 @@ frontend/dist/
 
 # Vite 临时产物
 frontend/vite.config.js.timestamp-*
+
+# macOS
+.DS_Store

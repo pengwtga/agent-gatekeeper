@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # LLM 通用
     llm_temperature: float = 0.0
     llm_timeout_seconds: int = 30
+    llm_max_tokens: int = 512  # 输出长度上界：根因 JSON 只需 ~150 token，512 足够且能防跑飞
     llm_max_retries: int = 1  # 单 Provider 内重试次数（跨 Provider 容灾由链路负责）
 
     # RAG 值班助手
@@ -38,6 +39,8 @@ class Settings(BaseSettings):
 
     # 分类 Agent
     min_confidence_for_auto_action: float = 0.85  # 置信度低于此值 → 建议人工确认
+    min_evidence_score: float = 0.35  # 证据可回溯度低于此值 → 视为无据，压置信度转人工（阈值标定见 docs/optimization/T0-03）
+    low_evidence_confidence_cap: float = 0.4  # 无据时的置信度上限
 
     # 服务
     api_port: int = 8001

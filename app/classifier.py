@@ -4,13 +4,16 @@
 1. 分类体系来自真实 oncall 归因：5 类根因覆盖 SSRM 注册/变更链路 90%+ 的卡单场景
 2. LLM 分类 + 规则基线双通道：LLM 不可用时自动降级，服务可用性不依赖外部 LLM
 3. 输出强制 JSON：root_cause_class / confidence / evidence / suggested_action
-4. 置信度门禁：低于阈值（0.85）建议人工确认 —— 沿用真实 SSRM "审批人工门禁" 的设计哲学
+4. 证据可回溯校验：evidence 里的锚点必须在输入原文里找得到，找不到就压置信度转人工
+   —— 模型自报的 confidence 不可信，但"理由能不能对上输入"是白盒可验证的
+5. 置信度门禁：低于阈值（0.85）建议人工确认 —— 沿用真实 SSRM "审批人工门禁" 的设计哲学
 """
 
 import logging
 from typing import Any, Optional
 
 from app.config import settings
+from app.evidence import evidence_score
 from app.llm_client import LLMClient, LLMNotConfiguredError
 
 logger = logging.getLogger(__name__)
@@ -61,6 +64,14 @@ FEW_SHOT = [
 ]
 
 
+def _as_float(value: Any, default: float = 0.0) -> float:
+    """模型可能返回 "0.9"、null 甚至 0.9 之外的值，统一收口到 [0, 1]"""
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 class RootCauseClassifier:
     """根因分类 Agent：LLM 主通道 + 规则基线降级通道"""
 
@@ -77,11 +88,13 @@ class RootCauseClassifier:
                     system_prompt=self._build_system(),
                     user_payload=_json.dumps(incident, ensure_ascii=False),
                 )
+                result["root_cause_class"] = self._validate_class(result.get("root_cause_class"))
+                result["confidence"] = _as_float(result.get("confidence"))
+                result["evidence"] = str(result.get("evidence") or "")
+                result["suggested_action"] = str(result.get("suggested_action") or "")
+                self._apply_evidence_gate(result, incident)
                 result["source"] = "llm"
                 result["llm_provider"] = result.pop("_provider", "unknown")
-                result["root_cause_class"] = self._validate_class(
-                    result.get("root_cause_class")
-                )
                 return result
             except Exception as e:
                 logger.warning(f"[RootCauseClassifier] LLM 降级到规则基线: {e}")
@@ -89,6 +102,25 @@ class RootCauseClassifier:
         result = self._rule_baseline(incident)
         result["source"] = "rule_fallback"
         return result
+
+    def _apply_evidence_gate(self, result: dict[str, Any], incident: dict[str, Any]) -> None:
+        """证据门禁：理由对不回输入原文 → 压低置信度、强制人工。
+
+        只作用于 LLM 通道：规则通道的 evidence 是代码用结构化字段拼出来的，
+        不存在"编造"这一风险，套用同一个匹配器只会把正确的规则判断误伤成低置信。
+        """
+        score = evidence_score(result["evidence"], incident)
+        result["evidence_score"] = score
+
+        if score < settings.min_evidence_score:
+            result["confidence"] = min(result["confidence"], settings.low_evidence_confidence_cap)
+            result["evidence_warning"] = "判断依据未能回溯到输入原文，已压置信度并建议人工复核"
+            logger.warning(
+                "[RootCauseClassifier] 证据无法回溯 score=%.3f class=%s evidence=%r",
+                score, result["root_cause_class"], result["evidence"][:80],
+            )
+
+        result["needs_human_review"] = result["confidence"] < settings.min_confidence_for_auto_action
 
     def _build_system(self) -> str:
         """system prompt + few-shot 组装"""

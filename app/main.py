@@ -10,7 +10,9 @@
 - GET  /assistant       值班助手页面（自然语言检索历史工单）
 """
 
+import ipaddress
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
@@ -45,16 +47,55 @@ app = FastAPI(title="SSRM Ops Agent", version="0.1.0", lifespan=lifespan)
 
 # ── 公网防护：服务会消耗 LLM API 配额，加最小成本的防刷措施 ──
 RATE_LIMIT_PER_MIN = 20  # 单 IP 每分钟上限（classify/assist）
+_RATE_WINDOW_S = 60
+_SWEEP_INTERVAL_S = 300  # 定期清理过期 IP，避免字典随扫描器无限增长
+
 _rate_bucket: dict[str, list[float]] = {}
+_last_sweep = 0.0
 
 
-def _check_rate(ip: str) -> None:
-    """内存滑动窗口限速（单实例部署够用；多实例需换 Redis）"""
-    import time as _t
-    now = _t.monotonic()
-    window = [t for t in _rate_bucket.get(ip, []) if now - t < 60]
+def _is_trusted_proxy(host: str) -> bool:
+    """只有对端是本机/内网时才相信它带来的转发头（防公网直连伪造 X-Real-IP 绕过限速）"""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host in ("localhost", "")
+    return ip.is_loopback or ip.is_private
+
+
+def _client_ip(request: Request) -> str:
+    """取真实客户端 IP。
+
+    部署形态是 nginx → 后端（后端只绑 127.0.0.1），nginx 已注入 X-Real-IP。
+    直接用 request.client.host 拿到的是 nginx 容器 IP，会把「单 IP 20/min」
+    退化成「全站 20/min」——一个人刷就把所有人限死。
+    """
+    peer = request.client.host if request.client else ""
+    if _is_trusted_proxy(peer):
+        xri = (request.headers.get("x-real-ip") or "").strip()
+        if xri:
+            return xri
+        xff = (request.headers.get("x-forwarded-for") or "").strip()
+        if xff:
+            return xff.split(",")[0].strip()
+    return peer or "unknown"
+
+
+def _check_rate(request: Request) -> None:
+    """按真实客户端 IP 的内存滑动窗口限速（单实例够用；多实例需换 Redis）"""
+    global _last_sweep
+    now = time.monotonic()
+
+    if now - _last_sweep > _SWEEP_INTERVAL_S:
+        for k in [k for k, v in _rate_bucket.items() if not v or now - v[-1] > _RATE_WINDOW_S]:
+            _rate_bucket.pop(k, None)
+        _last_sweep = now
+
+    ip = _client_ip(request)
+    window = [t for t in _rate_bucket.get(ip, []) if now - t < _RATE_WINDOW_S]
     if len(window) >= RATE_LIMIT_PER_MIN:
         _rate_bucket[ip] = window
+        logger.warning("[RateLimit] ip=%s 触发限速", ip)
         raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
     window.append(now)
     _rate_bucket[ip] = window
@@ -412,13 +453,14 @@ async def health():
         "status": "healthy",
         "llm_configured": llm_client.is_configured,
         "llm_providers": llm_client.configured_providers,
+        "llm_usage": llm_client.usage,   # 进程累计 token 用量，成本可见的最小实现
         "classes": list(ROOT_CAUSE_CLASSES.keys()),
     }
 
 
 @app.post("/classify")
 async def classify(req: ClassifyRequest, request: Request):
-    _check_rate(request.client.host)
+    _check_rate(request)
     result = await classifier.classify(req.incident)
     return result
 
@@ -433,7 +475,7 @@ async def eval_endpoint(req: EvalRequest, request: Request):
     token = request.query_params.get("token") or request.headers.get("x-eval-token")
     if not settings.eval_token or token != settings.eval_token:
         raise HTTPException(status_code=403, detail="评测接口需要有效 token（防公网刷量消耗 LLM 配额）")
-    _check_rate(request.client.host)
+    _check_rate(request)
     rows = load_dataset(limit=req.limit, shuffle=True)
     correct = 0
     per_class: dict[str, dict[str, int]] = {}
@@ -442,7 +484,6 @@ async def eval_endpoint(req: EvalRequest, request: Request):
     sources: dict[str, int] = {}
 
     for row in rows:
-        import time
         t0 = time.monotonic()
         result = await classifier.classify(row["incident"])
         latencies.append((time.monotonic() - t0) * 1000)
@@ -484,7 +525,7 @@ class AssistRequest(BaseModel):
 @app.post("/assist")
 async def assist(req: AssistRequest, request: Request):
     """值班助手：描述你遇到的问题，返回相似历史工单和处置建议"""
-    _check_rate(request.client.host)
+    _check_rate(request)
     return await rag.assist(req.question)
 
 
