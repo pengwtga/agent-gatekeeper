@@ -20,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from app.budget import Budget
 from app.classifier import ROOT_CAUSE_CLASSES, RootCauseClassifier
 from app.config import settings
 from app.dataset import load_dataset, stats
@@ -36,10 +37,17 @@ rag = RagAssistant(llm_client)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     providers = ",".join(llm_client.configured_providers) if llm_client.is_configured else "未配置(规则基线降级)"
-    logger.info("SSRM Ops Agent started | LLM 容灾链: %s", providers)
+    logger.info(
+        "SSRM Ops Agent started | LLM 容灾链: %s | 请求预算: %dms | 单次尝试: %dms",
+        providers, settings.request_budget_ms, settings.llm_timeout_per_try_ms,
+    )
     await rag.warmup()
     logger.info("RAG 值班助手就绪 | 模式: %s", rag.mode)
     yield
+    # 优雅退出：先关连接池再让进程退出，避免悬挂连接拖慢 shutdown
+    await llm_client.aclose()
+    await rag.aclose()
+    logger.info("连接池已关闭，进程退出")
 
 
 app = FastAPI(title="SSRM Ops Agent", version="0.1.0", lifespan=lifespan)
@@ -297,9 +305,9 @@ function render(d){
   const srcTag = d.source === 'llm'
     ? `<span class="tag t-llm">通道: LLM · ${esc(d.llm_provider||'?')}</span>`
     : '<span class="tag t-mode">通道: 规则基线</span>';
-  const review = (d.needs_human_review ?? (c < 0.85))
-    ? '<div class="warn">⚠️ 置信度低于自动处置门禁（0.85），建议人工确认后再执行处置</div>'
-    : '<div class="okv">✅ 置信度达到自动处置门禁（0.85），可按建议执行处置</div>';
+  const review = (!!d.needs_human_review)
+    ? '<div class="warn">⚠️ 置信度未达自动处置门禁，建议人工确认后再执行处置</div>'
+    : '<div class="okv">✅ 置信度达到自动处置门禁，可按建议执行处置</div>';
   box.innerHTML = `
     <div class="meta">
       <span class="tag t-cls">${esc(cls)}</span>
@@ -461,7 +469,9 @@ async def health():
 @app.post("/classify")
 async def classify(req: ClassifyRequest, request: Request):
     _check_rate(request)
-    result = await classifier.classify(req.incident)
+    budget = Budget(settings.request_budget_ms)
+    result = await classifier.classify(req.incident, budget)
+    result["budget_ms_remaining"] = budget.remaining_ms()
     return result
 
 
@@ -485,7 +495,7 @@ async def eval_endpoint(req: EvalRequest, request: Request):
 
     for row in rows:
         t0 = time.monotonic()
-        result = await classifier.classify(row["incident"])
+        result = await classifier.classify(row["incident"], Budget(settings.request_budget_ms))
         latencies.append((time.monotonic() - t0) * 1000)
         sources[result.get("source", "?")] = sources.get(result.get("source", "?"), 0) + 1
 
@@ -526,7 +536,8 @@ class AssistRequest(BaseModel):
 async def assist(req: AssistRequest, request: Request):
     """值班助手：描述你遇到的问题，返回相似历史工单和处置建议"""
     _check_rate(request)
-    return await rag.assist(req.question)
+    budget = Budget(settings.request_budget_ms)
+    return await rag.assist(req.question, budget)
 
 
 @app.get("/kb/stats")

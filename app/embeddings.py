@@ -22,10 +22,26 @@ BATCH_SIZE = 10
 class EmbeddingClient:
     def __init__(self, provider):
         self.provider = provider
+        self._client: httpx.AsyncClient | None = None
 
     @property
     def is_configured(self) -> bool:
         return self.provider is not None
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """共享连接池：warmup 批量向量化 + 每次提问的问题向量化共用，省掉重复 TLS 握手"""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=3.0, read=15.0, write=10.0, pool=2.0),
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=5),
+            )
+        return self._client
+
+    async def aclose(self):
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """分批向量化 + 429 退避重试。全部失败抛异常，由上层降级（关键词检索）。"""
@@ -54,12 +70,11 @@ class EmbeddingClient:
         raise last_err
 
     async def _call(self, batch: list[str]) -> list[list[float]]:
-        async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
-            resp = await client.post(
-                f"{self.provider.base_url}/embeddings",
-                headers={"Authorization": f"Bearer {self.provider.api_key}", "Content-Type": "application/json"},
-                json={"model": self.provider.embedding_model, "input": batch},
-            )
-            resp.raise_for_status()
-            data = sorted(resp.json()["data"], key=lambda d: d["index"])
-            return [d["embedding"] for d in data]
+        resp = await self.client.post(
+            f"{self.provider.base_url}/embeddings",
+            headers={"Authorization": f"Bearer {self.provider.api_key}", "Content-Type": "application/json"},
+            json={"model": self.provider.embedding_model, "input": batch},
+        )
+        resp.raise_for_status()
+        data = sorted(resp.json()["data"], key=lambda d: d["index"])
+        return [d["embedding"] for d in data]

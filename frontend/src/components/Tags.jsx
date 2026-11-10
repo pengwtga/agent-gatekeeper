@@ -1,4 +1,5 @@
-// 置信度徽标：原 JS 里的 confTag()，三档配色与门禁阈值一致（0.85 / 0.70）
+// 置信度徽标：三档配色（0.85 / 0.70）。
+// 注意：这里只是展示配色，不是门禁判定 —— 判定唯一来源是后端的 needs_human_review 字段
 export function ConfTag({ confidence }) {
   if (confidence == null) return null
   const cls = confidence >= 0.85 ? 't-hi' : confidence >= 0.7 ? 't-mid' : 't-lo'

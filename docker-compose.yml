@@ -34,6 +34,10 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    # 优雅退出：SIGTERM 后等 30s 再 SIGKILL。
+    # uvicorn --timeout-graceful-shutdown 25 在此窗口内等在途请求返回，
+    # 避免重启/发版把跑到一半的 Agent 请求（预算 12s）直接掐死。
+    stop_grace_period: 30s
     restart: unless-stopped
 
   web:

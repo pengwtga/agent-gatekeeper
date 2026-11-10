@@ -12,6 +12,7 @@
 import logging
 from typing import Any, Optional
 
+from app.budget import Budget
 from app.config import settings
 from app.evidence import evidence_score
 from app.llm_client import LLMClient, LLMNotConfiguredError
@@ -78,8 +79,13 @@ class RootCauseClassifier:
     def __init__(self, llm: LLMClient):
         self.llm = llm
 
-    async def classify(self, incident: dict[str, Any]) -> dict[str, Any]:
-        """分类入口。LLM 失败自动降级规则基线，结果标注 source。"""
+    async def classify(self, incident: dict[str, Any], budget: Optional[Budget] = None) -> dict[str, Any]:
+        """分类入口。LLM 失败自动降级规则基线，结果标注 source。
+
+        budget（T1-1）：LLM 通道在预算内尝试；预算耗尽或全链失败时降级规则基线，
+        并标记 degraded=true + 原因 —— 调用方（值班同学/上层系统）必须能区分
+        「这是 LLM 认真判断的」和「这是来不及认真判断的兜底结果」。
+        """
         import json as _json
 
         if self.llm.is_configured:
@@ -87,6 +93,7 @@ class RootCauseClassifier:
                 result = await self.llm.chat_json(
                     system_prompt=self._build_system(),
                     user_payload=_json.dumps(incident, ensure_ascii=False),
+                    budget=budget,
                 )
                 result["root_cause_class"] = self._validate_class(result.get("root_cause_class"))
                 result["confidence"] = _as_float(result.get("confidence"))
@@ -98,7 +105,13 @@ class RootCauseClassifier:
                 return result
             except Exception as e:
                 logger.warning(f"[RootCauseClassifier] LLM 降级到规则基线: {e}")
+                result = self._rule_baseline(incident)
+                result["source"] = "rule_fallback"
+                result["degraded"] = True
+                result["degraded_reason"] = str(e)[:200]
+                return result
 
+        # LLM 从未配置：这是部署形态而非故障，不算 degraded
         result = self._rule_baseline(incident)
         result["source"] = "rule_fallback"
         return result

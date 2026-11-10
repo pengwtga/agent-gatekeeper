@@ -158,7 +158,10 @@ export default function Playground() {
 function Result({ data }) {
   const confidence = data.confidence ?? 0
   const cls = data.root_cause_class || 'unknown'
-  const needsReview = data.needs_human_review ?? confidence < 0.85
+  // 门禁判定唯一来源是后端（needs_human_review 由 classifier 统一计算）。
+  // 前端不再兜底计算 —— 判定逻辑复制两份，改一处忘一处是必然事故。
+  // 字段缺失时按「需要人工」处理（fail-safe），绝不在前端猜一个放行。
+  const needsReview = data.needs_human_review !== false
 
   return (
     <>
@@ -188,9 +191,9 @@ function Result({ data }) {
       <div className="advice">{data.suggested_action || '（无）'}</div>
 
       {needsReview ? (
-        <div className="warn">⚠️ 置信度低于自动处置门禁（0.85），建议人工确认后再执行处置</div>
+        <div className="warn">⚠️ 置信度未达自动处置门禁，建议人工确认后再执行处置</div>
       ) : (
-        <div className="okv">✅ 置信度达到自动处置门禁（0.85），可按建议执行处置</div>
+        <div className="okv">✅ 置信度达到自动处置门禁，可按建议执行处置</div>
       )}
 
       <details>

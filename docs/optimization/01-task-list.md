@@ -328,7 +328,8 @@ logger.info("LLM 连接池已关闭")
 - 后端：**所有分支**（LLM / 规则 / unknown）都必须返回 `needs_human_review` 与 `confidence`；
 - 前端：删掉 `?? (c < 0.85)` 兜底，只读后端字段；`0.85` 这个魔法数字从 JS 里消失。
 
-**验收**：`grep -n "0.85" frontend/src/` 无结果；三条路径的响应 JSON 字段一致。
+**验收**：决策逻辑里 0.85 出现 0 次（`grep` 仅剩 Tags.jsx 的展示配色，含「非判定」注释）；
+三条路径（LLM 成功 / LLM 降级规则 / 纯规则）的响应 JSON 字段一致，均含 `needs_human_review`。
 
 ---
 

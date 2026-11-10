@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
+from app.budget import Budget
 from app.config import settings
 from app.embeddings import EmbeddingClient
 from app.llm_client import LLMClient
@@ -83,6 +84,11 @@ class RagAssistant:
     def ready(self) -> bool:
         return self._ready
 
+    async def aclose(self):
+        """退出时释放 embedding 连接池（由 main.lifespan 调用）"""
+        if self._embed_client is not None:
+            await self._embed_client.aclose()
+
     @property
     def mode(self) -> str:
         if not self._ready:
@@ -90,7 +96,7 @@ class RagAssistant:
         return "vector" if len(self.store) > 0 else "keyword+rerank"
 
     # ── 检索 ──
-    async def _retrieve(self, question: str, top_k: int) -> list[dict[str, Any]]:
+    async def _retrieve(self, question: str, top_k: int, budget: Optional[Budget] = None) -> list[dict[str, Any]]:
         if len(self.store) > 0 and self._embed_client:
             try:
                 qvec = (await self._embed_client.embed([question]))[0]
@@ -99,9 +105,12 @@ class RagAssistant:
                 logger.warning(f"[RAG] 向量检索失败，降级关键词检索: {e}")
         # 关键词召回（宽召回 8 条）→ LLM 重排序取 Top-N
         candidates = self._keyword_search(question, top_k=8)
-        return await self._llm_rerank(question, candidates, top_k)
+        return await self._llm_rerank(question, candidates, top_k, budget)
 
-    async def _llm_rerank(self, question: str, candidates: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
+    async def _llm_rerank(
+        self, question: str, candidates: list[dict[str, Any]], top_k: int,
+        budget: Optional[Budget] = None,
+    ) -> list[dict[str, Any]]:
         """小规模知识库的取舍：关键词宽召回 + LLM 重排序，替代 embedding 向量检索"""
         if not self.llm.is_configured or len(candidates) <= top_k:
             return candidates[:top_k]
@@ -114,7 +123,7 @@ class RagAssistant:
                         '只输出 JSON：{"order": [cand_id, ...]}')
             result = await self.llm.chat_json(
                 "你是检索重排序器。只依据问题与工单的语义相关性排序，不要编造。",
-                prompt)
+                prompt, budget=budget)
             order = [int(i) for i in result.get("order", []) if isinstance(i, int) and 0 <= i < len(candidates)]
             if not order:
                 return candidates[:top_k]
@@ -138,11 +147,11 @@ class RagAssistant:
         return scored[:top_k]
 
     # ── 值班问答 ──
-    async def assist(self, question: str) -> dict[str, Any]:
+    async def assist(self, question: str, budget: Optional[Budget] = None) -> dict[str, Any]:
         if not self._ready:
             return {"error": "知识库未就绪"}
 
-        hits = await self._retrieve(question, top_k=settings.rag_top_k)
+        hits = await self._retrieve(question, top_k=settings.rag_top_k, budget=budget)
         hits = [h for h in hits if h.get("score", 0) >= settings.rag_min_score]
 
         if not hits:
@@ -161,7 +170,7 @@ class RagAssistant:
                       "处置过程": h["resolution"]} for h in hits],
                     ensure_ascii=False)
                 result = await self.llm.chat_json(
-                    SYSTEM_PROMPT, f"值班提问：{question}\n\n相似历史工单：{context}")
+                    SYSTEM_PROMPT, f"值班提问：{question}\n\n相似历史工单：{context}", budget=budget)
                 result["sources"] = [{"ticket_id": h["ticket_id"], "title": h["title"],
                                       "root_cause_class": h["root_cause_class"],
                                       "score": h["score"]} for h in hits]

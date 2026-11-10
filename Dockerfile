@@ -36,4 +36,8 @@ EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8001/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# --timeout-graceful-shutdown：收到 SIGTERM 后等在途请求完成再退出。
+# Agent 请求预算 12s（settings.request_budget_ms），25s > 12s 保证在途请求能返回；
+# 配合 docker-compose 的 stop_grace_period: 30s（Docker 先 SIGTERM，30s 后才 SIGKILL）
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", \
+     "--timeout-graceful-shutdown", "25"]

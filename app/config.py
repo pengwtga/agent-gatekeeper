@@ -28,9 +28,15 @@ class Settings(BaseSettings):
 
     # LLM 通用
     llm_temperature: float = 0.0
-    llm_timeout_seconds: int = 30
+    llm_timeout_seconds: int = 30  # 无预算时的兜底读超时（评测脚本/离线任务）
     llm_max_tokens: int = 512  # 输出长度上界：根因 JSON 只需 ~150 token，512 足够且能防跑飞
     llm_max_retries: int = 1  # 单 Provider 内重试次数（跨 Provider 容灾由链路负责）
+
+    # 请求级超时预算（T1-1）：单请求总时长上界，nginx 超时（20s）应大于它
+    # 最坏路径 = 3 provider × 3s × 2 次 ≈ 18s 超 12s 预算 → 预算会掐掉尾部的 provider，
+    # 这是有意的：宁可降级规则基线，也不让请求超过 nginx 的 504 线
+    request_budget_ms: int = 12000
+    llm_timeout_per_try_ms: int = 3000  # 单 Provider 单次尝试的时间片
 
     # RAG 值班助手
     embedding_model: str = "embedding-2"  # 智谱向量化模型
