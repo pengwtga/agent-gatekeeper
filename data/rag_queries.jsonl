@@ -1,0 +1,30 @@
+{"query_id": "RQ-000", "question": "供应商反馈注册提交半天了，页面一直显示审批中，但后台查审批单早就通过了", "relevant": ["ONCALL-001"]}
+{"query_id": "RQ-001", "question": "对账脚本报警，xFlow 的工单已经是终态，但系统里找不到对应的注册任务", "relevant": ["ONCALL-002"]}
+{"query_id": "RQ-002", "question": "海外供应商等了八个多小时还在等审批，审批人是非工作时间批的", "relevant": ["ONCALL-003"]}
+{"query_id": "RQ-003", "question": "xFlow 那边回调配置还指向老域名，回调全挂了", "relevant": ["ONCALL-004"]}
+{"query_id": "RQ-004", "question": "审批人转办之后回调好像丢了，注册任务一直没建出来", "relevant": ["ONCALL-005"]}
+{"query_id": "RQ-005", "question": "审批单已经被驳回了，我们这边的状态还停在审批中没有更新", "relevant": ["ONCALL-006"]}
+{"query_id": "RQ-006", "question": "EA 正在例行发布，这期间创建供应商的调用全在超时", "relevant": ["ONCALL-007"]}
+{"query_id": "RQ-007", "question": "调 EA 的接口网关一直 504，重试了四次都没成功", "relevant": ["ONCALL-008"]}
+{"query_id": "RQ-008", "question": "供应商集中变更的时段，EA 接口开始返回 429 了", "relevant": ["ONCALL-009"]}
+{"query_id": "RQ-009", "question": "往主数据平台写数据的时候连接直接被重置了", "relevant": ["ONCALL-010"]}
+{"query_id": "RQ-010", "question": "同步队列里堆了两百多个任务，已经延迟半小时没消化完", "relevant": ["ONCALL-011"]}
+{"query_id": "RQ-011", "question": "服务器解析主数据平台的域名时好时坏", "relevant": ["ONCALL-012"]}
+{"query_id": "RQ-012", "question": "同一个供应商十秒内收到两笔注册请求，第二笔提示申请已存在", "relevant": ["ONCALL-013"]}
+{"query_id": "RQ-013", "question": "一条注册消息好像被消费了两次，重复建了任务", "relevant": ["ONCALL-014"]}
+{"query_id": "RQ-014", "question": "用户提交完刷新了一下页面，表单又重放了一遍", "relevant": ["ONCALL-015"]}
+{"query_id": "RQ-015", "question": "商务同时开了两个窗口，给两个供应商一起提交", "relevant": ["ONCALL-016"]}
+{"query_id": "RQ-016", "question": "客户端网络超时后自动重试，服务端其实已经处理成功了，产生了重复", "relevant": ["ONCALL-017"]}
+{"query_id": "RQ-017", "question": "同一个供应商的准入，被两个商务先后发起了两次", "relevant": ["ONCALL-018"]}
+{"query_id": "RQ-018", "question": "夜间对账发现 EA 里有这家供应商，门户上却查不到联系人", "relevant": ["ONCALL-019"]}
+{"query_id": "RQ-019", "question": "供应商改名以后 EA 更新成功了，但门户上显示的还是旧名字", "relevant": ["ONCALL-020"]}
+{"query_id": "RQ-020", "question": "对账任务连着两天没有产出补推记录了，攒了五笔差异", "relevant": ["ONCALL-021"]}
+{"query_id": "RQ-021", "question": "快照对比发现二十多家供应商在门户侧联系人字段是空的", "relevant": ["ONCALL-022"]}
+{"query_id": "RQ-022", "question": "系统里显示准入已完成，门户那边却还等着激活", "relevant": ["ONCALL-023"]}
+{"query_id": "RQ-023", "question": "搜索结果和直接查库对不上，差了两家供应商", "relevant": ["ONCALL-024"]}
+{"query_id": "RQ-024", "question": "营业执照那一栏，供应商交上来的是图片路径而不是编号", "relevant": ["ONCALL-025"]}
+{"query_id": "RQ-025", "question": "门户注册表单少了一个必填字段 site_code，后端校验直接拒了", "relevant": ["ONCALL-026"]}
+{"query_id": "RQ-026", "question": "供应商类型这个枚举，前端直接传了中文名过来", "relevant": ["ONCALL-027"]}
+{"query_id": "RQ-027", "question": "资质有效期前端传的是月日年格式，后端要的是年月日", "relevant": ["ONCALL-028"]}
+{"query_id": "RQ-028", "question": "金额字段前端传成了科学计数法的字符串", "relevant": ["ONCALL-029"]}
+{"query_id": "RQ-029", "question": "前端把空值传成空字符串，后端判空逻辑对不上", "relevant": ["ONCALL-030"]}

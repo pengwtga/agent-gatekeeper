@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 700" font-family="'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 730" font-family="'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif">
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#8b949e"/>
     </marker>
   </defs>
-  <rect width="1080" height="700" fill="#ffffff"/>
+  <rect width="1080" height="730" fill="#ffffff"/>
 
   <!-- 顶层：用户 -->
   <rect x="420" y="16" width="240" height="46" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
@@ -60,10 +60,10 @@
     <line x1="288" y1="354" x2="306" y2="354" marker-end="url(#arr)"/>
     <line x1="412" y1="354" x2="430" y2="354" marker-end="url(#arr)"/>
   </g>
-  <text x="64" y="398" font-size="11.5" fill="#6e7781">400 / 超时自动切换 · JSON 模式不兼容时宽松提取 · 全链失败落规则基线</text>
+  <text x="64" y="398" font-size="11.5" fill="#6e7781">400 / 超时自动切换 · JSON 模式不兼容时宽松提取 · 请求级时间预算 · 全链失败落规则基线</text>
 
   <rect x="64" y="416" width="416" height="32" rx="8" fill="#fff1e5" stroke="#d4a72c"/>
-  <text x="272" y="437" text-anchor="middle" font-size="12" fill="#9a6700">置信度门禁：&lt; 0.85 → needs_human_review（人工复核）</text>
+  <text x="272" y="437" text-anchor="middle" font-size="12" fill="#9a6700">门禁：置信度 &lt; 0.85 或证据无法回溯 → 人工复核</text>
 
   <rect x="56" y="466" width="468" height="42" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
   <text x="290" y="492" text-anchor="middle" font-size="12.5" fill="#1f2328">输出：<tspan font-weight="700">根因类别 + 置信度 + 证据 + 处置建议</tspan></text>
@@ -93,25 +93,28 @@
     <line x1="864" y1="354" x2="882" y2="354" marker-end="url(#arr)"/>
   </g>
 
-  <text x="604" y="402" font-size="12" fill="#9a6700">降级①　Embedding 不可用 → 关键词宽召回(8) + LLM 重排</text>
+  <text x="604" y="402" font-size="12" fill="#9a6700">降级①　Embedding 不可用 → 关键词宽召回(8) + LLM 重排（Recall@1 90% → 100%）</text>
   <text x="604" y="424" font-size="12" fill="#9a6700">降级②　LLM 不可用 → 直接返回原始 case</text>
 
   <rect x="596" y="466" width="428" height="42" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
-  <text x="810" y="492" text-anchor="middle" font-size="12.5" fill="#1f2328">采信阈值：相似度 &lt; 0.55 → <tspan font-weight="700">提示人工判断，不硬答</tspan></text>
+  <text x="810" y="486" text-anchor="middle" font-size="12" fill="#1f2328">采信阈值 0.55（阈值扫描定标）→ <tspan font-weight="700">低置信提示人工，不硬答</tspan></text>
+  <text x="810" y="502" text-anchor="middle" font-size="10.5" fill="#6e7781">0.5 起留存精度 96% · 0.55 起 100%（覆盖 73%）</text>
 
   <!-- 底层箭头 -->
   <line x1="290" y1="530" x2="290" y2="576" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arr)"/>
   <line x1="810" y1="530" x2="810" y2="576" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arr)"/>
 
   <!-- 数据层 -->
-  <rect x="40" y="580" width="640" height="92" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+  <rect x="40" y="580" width="640" height="122" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
   <text x="64" y="608" font-size="14" font-weight="700" fill="#1f2328">数据层</text>
-  <text x="64" y="634" font-size="12.5" fill="#1f2328"><tspan font-family="Menlo,monospace" fill="#1a5fb4">incidents.jsonl</tspan>　评测集 100 条（5 类 × 20，固定随机种子可复现）</text>
-  <text x="64" y="658" font-size="12.5" fill="#1f2328"><tspan font-family="Menlo,monospace" fill="#1a5fb4">kb_tickets.jsonl</tspan>　历史 oncall 工单知识库 30 条</text>
+  <text x="64" y="632" font-size="12.5" fill="#1f2328"><tspan font-family="Menlo,monospace" fill="#1a5fb4">incidents.jsonl</tspan>　分类评测 100 条（5 类 × 20）+ <tspan font-family="Menlo,monospace" fill="#1a5fb4">incidents_hard.jsonl</tspan> 困难 25 条</text>
+  <text x="64" y="655" font-size="12.5" fill="#1f2328"><tspan font-family="Menlo,monospace" fill="#1a5fb4">kb_tickets.jsonl</tspan>　历史 oncall 工单知识库 30 条</text>
+  <text x="64" y="678" font-size="12.5" fill="#1f2328"><tspan font-family="Menlo,monospace" fill="#1a5fb4">rag_queries(+hard).jsonl</tspan>　检索评测 30+10 条（Recall@1/@3 · MRR@8 · 阈值扫描）</text>
 
   <!-- 评测与可观测 -->
-  <rect x="720" y="580" width="320" height="92" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
+  <rect x="720" y="580" width="320" height="122" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>
   <text x="744" y="608" font-size="14" font-weight="700" fill="#1f2328">评测与可观测</text>
-  <text x="744" y="634" font-size="12.5" fill="#1f2328">/eval：准确率 · 分类别指标 · 延迟</text>
-  <text x="744" y="658" font-size="12.5" fill="#1f2328">/health：生效通道（source / llm_provider）</text>
+  <text x="744" y="632" font-size="12.5" fill="#1f2328">评测：分类准确率/延迟/混淆 · RAG Recall/MRR</text>
+  <text x="744" y="655" font-size="12.5" fill="#1f2328">可观测：trace_id + span 瀑布图（100 条环形缓冲）</text>
+  <text x="744" y="678" font-size="12.5" fill="#1f2328">分钟级指标 · /health 生效通道（source/llm_provider）</text>
 </svg>

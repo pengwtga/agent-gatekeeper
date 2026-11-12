@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     embedding_model: str = "embedding-2"  # 智谱向量化模型
     rag_top_k: int = 3
     rag_min_score: float = 0.55  # 相似度低于此值的检索结果不采信
+    warmup_timeout_seconds: int = 10  # 建索引不能无限期挡住启动，超时先以关键词模式接请求
 
     # 分类 Agent
     min_confidence_for_auto_action: float = 0.85  # 置信度低于此值 → 建议人工确认
@@ -50,6 +51,12 @@ class Settings(BaseSettings):
 
     # 服务
     api_port: int = 8001
+
+    # 可观测（T2）
+    log_format: str = "json"  # json | text；本地调试想看人话就设 text
+    log_level: str = "INFO"
+    metrics_window_seconds: int = 900  # 延迟分位数/成功率的滑动窗口（15 分钟）
+    metrics_max_samples: int = 2000  # 窗口内最多保留的延迟样本数（防内存增长）
 
     # 公网防护：/eval 一次请求会循环调用 LLM 30 次，需要 token 防刷（留空则 /eval 直接拒绝）
     eval_token: str = ""

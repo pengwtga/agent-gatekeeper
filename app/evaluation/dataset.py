@@ -5,7 +5,7 @@ import random
 from pathlib import Path
 from typing import Any, Optional
 
-DATA_FILE = Path(__file__).parent.parent / "data" / "incidents.jsonl"
+DATA_FILE = Path(__file__).parent.parent.parent / "data" / "incidents.jsonl"  # app/evaluation/ → 项目根
 
 
 def load_dataset(limit: Optional[int] = None, shuffle: bool = False,

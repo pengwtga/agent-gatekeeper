@@ -19,6 +19,19 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE = 10
 
 
+def _is_quota_exhausted(resp: httpx.Response) -> bool:
+    """429 里区分「限流」与「没额度」：后者重试没有意义。
+
+    智谱余额不足返回 HTTP 429 + {"error": {"code": "1113", "message": "余额不足或无可用资源包…"}}，
+    与真正的限流共用状态码。只有 1113 这类才是不可恢复的。
+    """
+    try:
+        err = resp.json().get("error") or {}
+    except Exception:
+        return False
+    return str(err.get("code")) == "1113" or "余额" in str(err.get("message", ""))
+
+
 class EmbeddingClient:
     def __init__(self, provider):
         self.provider = provider
@@ -60,12 +73,16 @@ class EmbeddingClient:
             try:
                 return await self._call(batch)
             except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429:
-                    logger.warning(f"[Embedding] 429 限流，{backoff}s 后重试（第 {attempt + 1} 次）")
+                if e.response.status_code == 429 and not _is_quota_exhausted(e.response):
+                    logger.warning("embedding 429 限流，退避重试",
+                                   extra={"event": "embedding_rate_limited", "stage": "embedding",
+                                          "attempt": attempt + 1, "reason": f"backoff={backoff}s", "outcome": "retry"})
                     last_err = e
                     await asyncio.sleep(backoff)
                     backoff *= 2
                 else:
+                    # 余额不足/无资源包也被智谱包装成 429，但重试一万次也不会成功，
+                    # 只会把启动卡住 30s × 批次数。识别出来直接抛，让上层降级。
                     raise
         raise last_err
 

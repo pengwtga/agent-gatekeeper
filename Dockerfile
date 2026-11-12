@@ -1,5 +1,5 @@
-# SSRM Ops Agent — 后端容器镜像
-# 构建：docker build -t ssrm-aiops-api:latest .
+# Agent Gatekeeper — 后端容器镜像
+# 构建：docker build -t agent-gatekeeper-api:latest .
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -39,5 +39,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 # --timeout-graceful-shutdown：收到 SIGTERM 后等在途请求完成再退出。
 # Agent 请求预算 12s（settings.request_budget_ms），25s > 12s 保证在途请求能返回；
 # 配合 docker-compose 的 stop_grace_period: 30s（Docker 先 SIGTERM，30s 后才 SIGKILL）
+# --no-access-log：uvicorn 默认 access log 是纯文本，会打断 `docker logs | jq`。
+# access 由 Obs 中间件发结构化事件（含 trace_id / duration_ms / status / tokens）替代。
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", \
-     "--timeout-graceful-shutdown", "25"]
+     "--timeout-graceful-shutdown", "25", "--no-access-log"]

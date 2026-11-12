@@ -12,16 +12,17 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from app.budget import Budget
+from app.core.budget import Budget
 from app.config import settings
-from app.embeddings import EmbeddingClient
-from app.llm_client import LLMClient
-from app.vector_store import InMemoryVectorStore
+from app.core.embeddings import EmbeddingClient
+from app.core.llm_client import LLMClient
+from app.observability.tracing import span
+from app.core.vector_store import InMemoryVectorStore
 
 logger = logging.getLogger(__name__)
 
-KB_FILE = Path(__file__).parent.parent / "data" / "kb_tickets.jsonl"
-CACHE_FILE = Path(__file__).parent.parent / "data" / "kb_vectors.json"
+KB_FILE = Path(__file__).parent.parent.parent / "data" / "kb_tickets.jsonl"  # app/agents/ → 项目根
+CACHE_FILE = Path(__file__).parent.parent.parent / "data" / "kb_vectors.json"
 
 SYSTEM_PROMPT = """你是 SSRM（供应商管理系统）的值班助手。值班同事遇到卡单/同步失败问题时会来问你。
 你会收到：①值班同事的提问；②知识库中检索到的相似历史工单（含现象、根因、处置过程）。
@@ -49,12 +50,13 @@ class RagAssistant:
         if cache.load(CACHE_FILE) and len(cache) == len(tickets):
             self.store = cache
             self._ready = True
-            logger.info(f"[RAG] 知识库从缓存加载: {len(tickets)} 条")
+            logger.info("知识库从缓存加载", extra={"event": "rag_cache_hit", "stage": "rag", "count": len(tickets), "outcome": "ok"})
             return
 
         provider = self._pick_provider()
         if provider is None:
-            logger.warning("[RAG] 无可用 embedding Provider，知识库以关键词+LLM重排模式运行")
+            logger.warning("无可用 embedding Provider，知识库以关键词+LLM重排模式运行",
+                           extra={"event": "rag_mode_degraded", "stage": "rag", "reason": "no_embedding_provider", "outcome": "degraded"})
             self._ready = True
             return
 
@@ -64,14 +66,24 @@ class RagAssistant:
             vectors = await self._embed_client.embed(texts)
         except Exception as e:
             # 例：智谱 embedding-2 需要资源包（余额不足包装成 429），免费档不可用
-            logger.warning(f"[RAG] embedding 不可用（{e}），降级为关键词召回 + LLM 重排模式")
-            self._embed_client = None
-            self._ready = True
+            self.degrade_to_keyword(str(e))
             return
         self.store.add(tickets, vectors)
         self.store.save(CACHE_FILE)
         self._ready = True
-        logger.info(f"[RAG] 知识库预热完成: {len(tickets)} 条已向量化")
+        logger.info("知识库预热完成", extra={"event": "rag_warmed", "stage": "rag", "count": len(tickets), "outcome": "ok"})
+
+    def degrade_to_keyword(self, reason: str) -> None:
+        """放弃向量检索，退回关键词召回 + LLM 重排。
+
+        两条路径都会走到这里：embedding 调用失败（没额度/没 key），
+        以及启动预热超时（服务不能为了建索引一直不接请求）。
+        """
+        self._embed_client = None
+        self._ready = True
+        logger.warning("embedding 不可用，降级为关键词召回 + LLM 重排模式",
+                       extra={"event": "rag_mode_degraded", "stage": "rag",
+                              "reason": reason[:160], "outcome": "degraded"})
 
     def _pick_provider(self):
         """取容灾链中第一个可用 Provider 做 embedding（模型名换成 embedding 模型）"""
@@ -99,12 +111,17 @@ class RagAssistant:
     async def _retrieve(self, question: str, top_k: int, budget: Optional[Budget] = None) -> list[dict[str, Any]]:
         if len(self.store) > 0 and self._embed_client:
             try:
-                qvec = (await self._embed_client.embed([question]))[0]
+                with span("rag.embed", mode="vector") as s:
+                    qvec = (await self._embed_client.embed([question]))[0]
+                    s["attrs"]["dim"] = len(qvec)
                 return self.store.search(qvec, top_k=top_k)
             except Exception as e:
-                logger.warning(f"[RAG] 向量检索失败，降级关键词检索: {e}")
+                logger.warning("向量检索失败，降级关键词检索",
+                               extra={"event": "rag_retrieve_degraded", "stage": "rag", "reason": str(e)[:160], "outcome": "degraded"})
         # 关键词召回（宽召回 8 条）→ LLM 重排序取 Top-N
-        candidates = self._keyword_search(question, top_k=8)
+        with span("rag.keyword", mode="keyword") as s:
+            candidates = self._keyword_search(question, top_k=8)
+            s["attrs"]["candidates"] = len(candidates)
         return await self._llm_rerank(question, candidates, top_k, budget)
 
     async def _llm_rerank(
@@ -121,10 +138,12 @@ class RagAssistant:
                       + json.dumps(cands, ensure_ascii=False)
                       + f'\n\n请选出与提问最相关的至多 {top_k} 条，按相关性降序。'
                         '只输出 JSON：{"order": [cand_id, ...]}')
-            result = await self.llm.chat_json(
-                "你是检索重排序器。只依据问题与工单的语义相关性排序，不要编造。",
-                prompt, budget=budget)
-            order = [int(i) for i in result.get("order", []) if isinstance(i, int) and 0 <= i < len(candidates)]
+            with span("rag.rerank", candidates=len(candidates)) as s:
+                result = await self.llm.chat_json(
+                    "你是检索重排序器。只依据问题与工单的语义相关性排序，不要编造。",
+                    prompt, budget=budget)
+                order = [int(i) for i in result.get("order", []) if isinstance(i, int) and 0 <= i < len(candidates)]
+                s["attrs"]["ordered"] = len(order)
             if not order:
                 return candidates[:top_k]
             picked = [candidates[i] for i in order[:top_k]]
@@ -133,7 +152,8 @@ class RagAssistant:
                 c["score"] = round(1.0 - rank * 0.1, 2)
             return picked
         except Exception as e:
-            logger.warning(f"[RAG] LLM 重排失败，使用关键词序: {e}")
+            logger.warning("LLM 重排失败，使用关键词序",
+                           extra={"event": "rag_rerank_failed", "stage": "rag", "reason": str(e)[:160], "outcome": "degraded"})
             return candidates[:top_k]
 
     def _keyword_search(self, question: str, top_k: int) -> list[dict[str, Any]]:
@@ -151,8 +171,10 @@ class RagAssistant:
         if not self._ready:
             return {"error": "知识库未就绪"}
 
-        hits = await self._retrieve(question, top_k=settings.rag_top_k, budget=budget)
-        hits = [h for h in hits if h.get("score", 0) >= settings.rag_min_score]
+        with span("rag.retrieve", top_k=settings.rag_top_k, mode=self.mode) as s:
+            hits = await self._retrieve(question, top_k=settings.rag_top_k, budget=budget)
+            hits = [h for h in hits if h.get("score", 0) >= settings.rag_min_score]
+            s["attrs"]["hits"] = len(hits)
 
         if not hits:
             return {
@@ -160,7 +182,8 @@ class RagAssistant:
                 "confidence": 0.0,
                 "sources": [],
                 "mode": self.mode,
-            }        # LLM 总结（不可用则直接返回原始 case）
+            }
+        # LLM 总结（不可用则直接返回原始 case）
         if self.llm.is_configured:
             try:
                 context = json.dumps(
@@ -169,8 +192,10 @@ class RagAssistant:
                       "根因类别": h["root_cause_class"],
                       "处置过程": h["resolution"]} for h in hits],
                     ensure_ascii=False)
-                result = await self.llm.chat_json(
-                    SYSTEM_PROMPT, f"值班提问：{question}\n\n相似历史工单：{context}", budget=budget)
+                with span("rag.answer", hits=len(hits)) as s:
+                    result = await self.llm.chat_json(
+                        SYSTEM_PROMPT, f"值班提问：{question}\n\n相似历史工单：{context}", budget=budget)
+                    s["attrs"]["provider"] = result.get("_provider")
                 result["sources"] = [{"ticket_id": h["ticket_id"], "title": h["title"],
                                       "root_cause_class": h["root_cause_class"],
                                       "score": h["score"]} for h in hits]
@@ -178,7 +203,8 @@ class RagAssistant:
                 result["llm_provider"] = result.pop("_provider", "unknown")
                 return result
             except Exception as e:
-                logger.warning(f"[RAG] LLM 总结失败，降级返回原始 case: {e}")
+                logger.warning("LLM 总结失败，降级返回原始 case",
+                               extra={"event": "rag_answer_degraded", "stage": "rag", "reason": str(e)[:160], "outcome": "degraded"})
 
         return {
             "answer": "LLM 暂不可用，以下是检索到的最相似历史工单，请人工参考：",

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Header from '../components/Header.jsx'
 import { CLASS_NAME, ConfTag } from '../components/Tags.jsx'
@@ -101,7 +101,11 @@ export default function Playground() {
   }
 
   // ?demo=1 自动跑一个预设案例（README 截图 / 面试现场演示用）
+  // ref 去重：StrictMode 开发态会执行两次 effect，否则会重复分类并浪费一次 LLM 调用
+  const demoRan = useRef(false)
   useEffect(() => {
+    if (demoRan.current) return
+    demoRan.current = true
     if (params.has('demo')) run(JSON.stringify({ incident: CASES.callback.incident }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -109,8 +113,8 @@ export default function Playground() {
   return (
     <div className="wrap">
       <Header
-        title="🔍 根因分类"
-        desc="给后端值班定位问题用的：输入卡单/失败事件的结构化上下文，输出根因类别、置信度、判断依据与处置建议"
+        title="根因分类"
+        desc="线上由 SSRM 卡单页在供应商求助时调用同一接口；这里是不接上游的手动入口——粘贴一条事件上下文，就能看到根因、置信度、判断依据与处置建议"
       />
 
       <div className="chips">
@@ -131,7 +135,7 @@ export default function Playground() {
         />
         <div className="actions">
           <button className="primary" disabled={loading} onClick={() => run()}>
-            {loading ? '分类中…' : '🔍 开始分类'}
+            {loading ? '分类中…' : '开始分类'}
           </button>
           <span className="hint">
             LLM 通道约 5~10 秒 · 字段含义：stage 阶段 / source_system 来源 / wait_minutes 已等待分钟数 /
@@ -184,10 +188,10 @@ function Result({ data }) {
         <span className="rpct">{Math.round(confidence * 100)}%</span>
       </div>
 
-      <div className="sec">🔍 判断依据</div>
+      <div className="sec">判断依据</div>
       <div className="advice">{data.evidence || '（无）'}</div>
 
-      <div className="sec">💡 处置建议</div>
+      <div className="sec">处置建议</div>
       <div className="advice">{data.suggested_action || '（无）'}</div>
 
       {needsReview ? (

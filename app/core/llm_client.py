@@ -20,23 +20,50 @@
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
 import httpx
 
-from app.budget import MIN_TRY_MS, Budget
+from app.core.budget import MIN_TRY_MS, Budget
 from app.config import settings
+from app.observability.obs import add_request_usage
+from app.observability.tracing import span
 
 logger = logging.getLogger(__name__)
 
 
 class LLMError(Exception):
-    pass
+    """LLM 调用失败。
+
+    code 让上层能按原因归因，而不是靠解析异常里的字符串：
+    - not_configured   一个 Key 都没配（部署形态，不是故障）
+    - budget_exhausted 剩余预算不够发起下一次尝试（T1-1 的预期行为）
+    - json_fail        模型返回了但不是合法 JSON（Prompt/模型能力问题）
+    - provider_error   网络/HTTP/结构异常（provider 侧问题）
+    上层按 code 打降级指标，才能区分「我们没钱等了」和「人家挂了」。
+    """
+
+    def __init__(self, message: str, code: str = "provider_error"):
+        super().__init__(message)
+        self.code = code
 
 
 class LLMNotConfiguredError(LLMError):
-    pass
+    def __init__(self, message: str, code: str = "not_configured"):
+        super().__init__(message, code=code)
+
+
+def _err_text(e: BaseException) -> str:
+    """异常的可读描述。
+
+    httpx 的超时异常（ReadTimeout/ConnectTimeout）str() 是空串，
+    只记 str(e) 会得到 reason:""——日志里等于什么都没说，排查时只能靠猜。
+    所以退化成「类名 + 有则附加消息」。
+    """
+    msg = str(e).strip()
+    return f"{type(e).__name__}: {msg}" if msg else type(e).__name__
 
 
 @dataclass
@@ -128,12 +155,16 @@ class LLMClient:
             raise LLMNotConfiguredError("未配置任何 LLM Provider 的 API Key")
 
         errors: list[str] = []
+        last_code = "budget_exhausted"
         for provider in self.chain:
             if budget is not None and budget.slice(settings.llm_timeout_per_try_ms) < MIN_TRY_MS:
                 errors.append(f"{provider.name}: skipped(剩余预算不足 {budget.remaining_ms()}ms)")
                 logger.warning(
-                    "[LLMClient] 剩余预算 %dms 不足以再试 %s，停止容灾遍历",
-                    budget.remaining_ms(), provider.name,
+                    "剩余预算不足，停止容灾遍历",
+                    extra={
+                        "event": "llm_chain_stop", "stage": "budget", "provider": provider.name,
+                        "reason": f"remaining_ms={budget.remaining_ms()}", "outcome": "skipped",
+                    },
                 )
                 break
             try:
@@ -141,9 +172,16 @@ class LLMClient:
                 result["_provider"] = provider.name
                 return result
             except Exception as e:
-                errors.append(f"{provider.name}: {e}")
-                logger.warning(f"[LLMClient] provider={provider.name} 失败，切换下一个: {e}")
-        raise LLMError(f"所有 LLM Provider 均失败: {'; '.join(errors)}")
+                errors.append(f"{provider.name}: {_err_text(e)}")
+                last_code = getattr(e, "code", "provider_error")
+                logger.warning(
+                    "provider 失败，切换下一个",
+                    extra={
+                        "event": "llm_provider_fail", "stage": "llm", "provider": provider.name,
+                        "reason": _err_text(e)[:200], "outcome": "fail",
+                    },
+                )
+        raise LLMError(f"所有 LLM Provider 均失败: {'; '.join(errors)}", code=last_code)
 
     async def _call_with_retry(
         self, provider: Provider, system_prompt: str, user_payload: str,
@@ -168,34 +206,50 @@ class LLMClient:
             if budget is not None:
                 per_try_ms = budget.slice(settings.llm_timeout_per_try_ms)
                 if per_try_ms < MIN_TRY_MS:
-                    raise LLMError(f"{provider.name}: 剩余预算 {per_try_ms}ms，跳过本次尝试")
+                    raise LLMError(f"{provider.name}: 剩余预算 {per_try_ms}ms，跳过本次尝试", code="budget_exhausted")
             else:
                 per_try_ms = settings.llm_timeout_seconds * 1000
-            try:
-                return await self._call(
-                    provider, system_prompt, user_payload,
-                    use_json_mode=use_json_mode, read_timeout_s=per_try_ms / 1000,
-                )
-            except _JSONModeUnsupported:
-                if not use_json_mode:  # 宽松模式还报不支持，说明不是这个原因，交给上层容灾
-                    raise
-                use_json_mode = False
-                self._no_json_mode.add(provider.name)
-                logger.info(
-                    "[LLMClient] provider=%s 不支持 response_format=json_object，改用宽松 JSON 提取（不计入重试）",
-                    provider.name,
-                )
-                continue
-            except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
-                failures += 1
-                last_err = e
-                logger.warning(
-                    "[LLMClient] provider=%s 第 %d 次尝试失败: %s",
-                    provider.name, failures, e,
-                )
+            # 每次尝试一个 span：容灾链上重试几次、每次在哪个 provider 上耗多久，
+            # 只看总耗时是看不出来的
+            with span("llm.try", provider=provider.name, attempt=failures + 1,
+                      json_mode=use_json_mode, timeout_ms=round(per_try_ms)) as s:
+                try:
+                    return await self._call(
+                        provider, system_prompt, user_payload,
+                        use_json_mode=use_json_mode, read_timeout_s=per_try_ms / 1000,
+                    )
+                except _JSONModeUnsupported:
+                    if not use_json_mode:  # 宽松模式还报不支持，说明不是这个原因，交给上层容灾
+                        raise
+                    use_json_mode = False
+                    self._no_json_mode.add(provider.name)
+                    s["attrs"]["result"] = "json_mode_unsupported"
+                    logger.info(
+                        "provider 不支持 response_format=json_object，改用宽松 JSON 提取",
+                        extra={
+                            "event": "llm_json_mode_unsupported", "stage": "llm", "provider": provider.name,
+                            "reason": "http_400_on_json_object", "outcome": "degraded",
+                        },
+                    )
+                    continue
+                except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
+                    failures += 1
+                    last_err = e
+                    s["attrs"]["result"] = "fail"
+                    logger.warning(
+                        "provider 调用失败",
+                        extra={
+                            "event": "llm_attempt_fail", "stage": "llm", "provider": provider.name,
+                            "attempt": failures, "reason": _err_text(e)[:200], "outcome": "fail",
+                        },
+                    )
 
         # last_err 必定非空：能走到这里说明至少失败过；保留兜底文案避免出现 LLMError("None")
-        raise LLMError(f"{provider.name}: {last_err if last_err is not None else '调用失败'}")
+        code = "json_fail" if isinstance(last_err, json.JSONDecodeError) else "provider_error"
+        raise LLMError(
+            f"{provider.name}: {_err_text(last_err) if last_err is not None else '调用失败'}",
+            code=code,
+        )
 
     async def _call(
         self, provider: Provider, system_prompt: str, user_payload: str,
@@ -213,6 +267,7 @@ class LLMClient:
         if use_json_mode:
             body["response_format"] = {"type": "json_object"}
 
+        t0 = time.perf_counter()
         # 共享连接池 + 每请求覆盖 read 超时（预算切片），connect/write/pool 沿用池默认
         timeout = None
         if read_timeout_s is not None:
@@ -229,8 +284,11 @@ class LLMClient:
         if resp.status_code == 400 and use_json_mode:
             # 部分模型不支持 response_format=json_object → 宽松模式重试
             logger.info(
-                "[LLMClient] provider=%s 返回 400（疑似不支持 json_object），响应片段: %s",
-                provider.name, resp.text[:200],
+                "provider 返回 400（疑似不支持 json_object）",
+                extra={
+                    "event": "llm_http_400", "stage": "llm", "provider": provider.name,
+                    "reason": resp.text[:120], "outcome": "degraded",
+                },
             )
             raise _JSONModeUnsupported()
         if resp.status_code >= 400:
@@ -240,30 +298,63 @@ class LLMClient:
                 f"{provider.name} HTTP {resp.status_code}: {resp.text[:200]}",
                 request=resp.request, response=resp,
             )
+        duration_ms = round((time.perf_counter() - t0) * 1000, 1)
         data = resp.json()
         self._record_usage(provider, data.get("usage"))
         choice = data["choices"][0]
-        if choice.get("finish_reason") == "length":
+        truncated = choice.get("finish_reason") == "length"
+        if truncated:
             # 被 max_tokens 截断时 JSON 必然不完整，提前告警比等 JSONDecodeError 更好定位
-            logger.warning("[LLMClient] provider=%s 输出被 max_tokens=%d 截断", provider.name, settings.llm_max_tokens)
+            from app.observability.metrics import metrics as _m
+            _m.record_json_fail("truncated")
+            logger.warning(
+                "输出被 max_tokens 截断",
+                extra={
+                    "event": "llm_truncated", "stage": "llm", "provider": provider.name,
+                    "reason": f"max_tokens={settings.llm_max_tokens}", "outcome": "fail",
+                },
+            )
         content = choice["message"]["content"]
-        return _extract_json(content)
+        usage = data.get("usage") or {}
+        logger.info(
+            "LLM 调用完成",
+            extra={
+                "event": "llm_call", "stage": "llm", "provider": provider.name,
+                "model": provider.model, "duration_ms": duration_ms,
+                "tokens": int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0),
+                "outcome": "ok",
+            },
+        )
+        return _extract_json(content, provider=provider.name)
 
     # ── 成本可见：token 计数（进程级，多 worker 需换 Prometheus 计数器）──
     def _record_usage(self, provider: Provider, usage: Optional[dict[str, Any]]) -> None:
+        from app.observability.metrics import metrics  # 延迟导入：metrics 不依赖 llm_client，但保持模块加载顺序简单
+
         self._usage["calls"] += 1
         if not usage:
             self._usage["usage_missing"] += 1
-            logger.info("[LLM] provider=%s model=%s token 用量未返回", provider.name, provider.model)
+            logger.info(
+                "token 用量未返回",
+                extra={
+                    "event": "llm_usage_missing", "stage": "llm", "provider": provider.name,
+                    "model": provider.model, "outcome": "degraded",
+                },
+            )
             return
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or 0)
         self._usage["prompt_tokens"] += prompt_tokens
         self._usage["completion_tokens"] += completion_tokens
+        add_request_usage(prompt_tokens, completion_tokens)   # 记到当前请求账上（T2-4）
+        metrics.record_tokens(prompt_tokens, completion_tokens)  # 记到最近一小时窗口
         logger.info(
-            "[LLM] provider=%s model=%s in=%d out=%d | 累计 calls=%d in=%d out=%d",
-            provider.name, provider.model, prompt_tokens, completion_tokens,
-            self._usage["calls"], self._usage["prompt_tokens"], self._usage["completion_tokens"],
+            "token 记账",
+            extra={
+                "event": "llm_usage", "stage": "llm", "provider": provider.name,
+                "model": provider.model, "tokens": prompt_tokens + completion_tokens,
+                "outcome": "ok",
+            },
         )
 
     @property
@@ -280,19 +371,55 @@ class _JSONModeUnsupported(Exception):
     pass
 
 
-def _extract_json(content: str) -> dict[str, Any]:
-    """宽松 JSON 提取：直接解析 → 剥代码围栏 → 截取首个平衡花括号块"""
+def _extract_json(content: str, provider: str = "unknown") -> dict[str, Any]:
+    """宽松 JSON 提取：直接解析 → 剥代码围栏 → 截取首个平衡花括号块
+
+    每种失败都按类型计数（T2-3 的 json_parse_fail）：
+    - no_json / invalid_json：模型根本没给 JSON，或给了半截
+    - code_fence_invalid / brace_invalid：找到了包裹但内容不合法
+    「救回来」的次数也记（json_recovered）：它比失败率更早预警 ——
+    一个 provider 从 0 次变成常常要靠剥围栏，说明它开始不守格式了，
+    此时还没失败，但已经在恶化。
+    """
+    from app.observability.metrics import metrics
+
     content = content.strip()
     try:
         return json.loads(content)
     except json.JSONDecodeError:
         pass
+
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
     if fenced:
-        return json.loads(fenced.group(1))
+        try:
+            result = json.loads(fenced.group(1))
+        except json.JSONDecodeError:
+            metrics.record_json_fail("code_fence_invalid")
+        else:
+            metrics.record_json_recovered("code_fence")
+            logger.info(
+                "JSON 靠剥代码围栏救回",
+                extra={"event": "llm_json_recovered", "stage": "llm", "provider": provider,
+                       "reason": "code_fence", "outcome": "degraded"},
+            )
+            return result
+
     brace = re.search(r"\{.*\}", content, re.DOTALL)
     if brace:
-        return json.loads(brace.group(0))
+        try:
+            result = json.loads(brace.group(0))
+        except json.JSONDecodeError:
+            metrics.record_json_fail("brace_invalid")
+        else:
+            metrics.record_json_recovered("brace_slice")
+            logger.info(
+                "JSON 靠截取花括号块救回",
+                extra={"event": "llm_json_recovered", "stage": "llm", "provider": provider,
+                       "reason": "brace_slice", "outcome": "degraded"},
+            )
+            return result
+
+    metrics.record_json_fail("no_json" if brace is None and fenced is None else "invalid_json")
     raise json.JSONDecodeError("no json found", content, 0)
 
 

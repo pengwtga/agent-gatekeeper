@@ -1,4 +1,4 @@
-# SSRM Ops Agent — 一键起服务
+# Agent Gatekeeper — 一键起服务
 #
 #   docker compose up -d --build      启动（含构建）
 #   docker compose ps                 看两个服务健康状态
@@ -12,8 +12,8 @@ services:
   api:
     build:
       context: .
-    image: ssrm-aiops-api:latest
-    container_name: ssrm-aiops-api
+    image: agent-gatekeeper-api:latest
+    container_name: agent-gatekeeper-api
     # LLM 密钥从 .env 注入，绝不打进镜像
     env_file:
       - .env
@@ -43,8 +43,8 @@ services:
   web:
     build:
       context: ./frontend
-    image: ssrm-aiops-web:latest
-    container_name: ssrm-aiops-web
+    image: agent-gatekeeper-web:latest
+    container_name: agent-gatekeeper-web
     ports:
       - "8001:80"
     depends_on:

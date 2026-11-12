@@ -50,7 +50,12 @@ export default function Assistant() {
   }
 
   // ?demo=1 自动问一个预设问题（README 截图 / 面试演示用）
+  // 必须用 ref 去重：StrictMode 在开发态会把 effect 执行两次，
+  // 否则同一句话会被发两遍，页面上出现两条一模一样的提问（还白烧一次 LLM 配额）
+  const demoRan = useRef(false)
   useEffect(() => {
+    if (demoRan.current) return
+    demoRan.current = true
     if (params.has('demo')) send(PRESETS[0].q)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -58,12 +63,12 @@ export default function Assistant() {
   return (
     <div className="wrap">
       <Header
-        title="🛎️ SSRM 值班助手"
+        title="SSRM 值班助手"
         desc="值班 oncall 时用一句话描述问题，自动检索相似历史工单并给出处置建议"
       >
         {kb && (
           <span className="tag t-mode" style={{ marginTop: 8 }}>
-            📚 知识库 {kb.tickets} 条 · {modeName(kb.mode)}
+            知识库 {kb.tickets} 条 · {modeName(kb.mode)}
           </span>
         )}
       </Header>
@@ -115,9 +120,9 @@ function Intro() {
     <>
       你好！我是 SSRM 值班助手。遇到线上问题直接用一句话描述（也可以点上面的案例卡片），我会：
       <br />
-      1️⃣ 检索最相似的历史工单
+      1. 检索最相似的历史工单
       <br />
-      2️⃣ 结合 LLM 给出处置建议
+      2. 结合 LLM 给出处置建议
       <br />
       <span className="hint">置信度低于 55% 时会明确提示转人工，不硬答。</span>
     </>
@@ -139,7 +144,7 @@ function Answer({ data }) {
         <ConfTag confidence={data.confidence} />
       </div>
 
-      <div className="sec">💡 处置建议</div>
+      <div className="sec">处置建议</div>
       <div className="advice">{answerText}</div>
 
       {lowConfidence && (
@@ -148,7 +153,7 @@ function Answer({ data }) {
 
       {data.cases?.length ? (
         <>
-          <div className="sec">📋 相似历史工单（LLM 暂不可用，返回原始 case）</div>
+          <div className="sec">相似历史工单（LLM 暂不可用，返回原始 case）</div>
           {data.cases.map((c) => (
             <div className="case" key={c.ticket_id}>
               <b className="tid2">{c.ticket_id}</b> · {c.title}
@@ -163,7 +168,7 @@ function Answer({ data }) {
         </>
       ) : data.sources?.length ? (
         <>
-          <div className="sec">📋 相似历史工单 Top {data.sources.length}</div>
+          <div className="sec">相似历史工单 Top {data.sources.length}</div>
           {data.sources.map((s) => {
             const pct = Math.round((s.score || 0) * 100)
             const hasDetail = Boolean(data.sources[0].title)

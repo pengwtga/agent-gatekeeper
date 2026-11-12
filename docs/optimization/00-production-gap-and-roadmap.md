@@ -1,6 +1,6 @@
 # ssrm-aiops：与生产级 Agent 的差距诊断与优化方案
 
-> 对象：`github.com/pengwtga/ssrm-aiops`（Python / FastAPI，个人开源项目）
+> 对象：`github.com/pengwtga/ssrm-aiops`（Python / FastAPI，个人开源项目；现名 agent-gatekeeper）
 > 依据：简历描述 + 前序对话中确认的部署形态（云服务器 / systemd 单进程 / 本地 JSONL 向量缓存 / 应用层单 IP 限速 / 30 条工单 / 4 家 Provider 降级链 / 100 条合成集 + 25 条困难集）
 > 说明：部分判断基于上述信息推断，凡是推断处均标注 **【推断】**，若与实际情况不符以实际为准。
 > 生成时间：2026-11-10

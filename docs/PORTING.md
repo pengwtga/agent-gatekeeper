@@ -28,16 +28,16 @@
 ### Step 3 · 本地验证构建
 
 ```bash
-cd ssrm-aiops
+cd agent-gatekeeper
 
 # 只构建后端，先确认能过
-docker build -t ssrm-aiops-api:latest .
+docker build -t agent-gatekeeper-api:latest .
 
 # 看镜像多大（python:3.12-slim + 依赖，实测 235MB）
-docker images ssrm-aiops-api
+docker images agent-gatekeeper-api
 
 # 确认 .env 没被打进镜像 —— 应该只列出 app / data / scripts，没有 .env
-docker run --rm ssrm-aiops-api:latest ls -a /app
+docker run --rm agent-gatekeeper-api:latest ls -a /app
 ```
 
 **验收**：`docker build` 成功，且 `ls -a /app` 里**不存在 `.env`**。
@@ -73,16 +73,16 @@ docker compose logs -f api            # 看到 "RAG 值班助手就绪 | 模式:
 curl -fsSL https://get.docker.com | sh
 
 # 把代码拉上去（不要拉 .env）
-rsync -av --exclude='.venv' --exclude='node_modules' --exclude='.git' ./ root@124.222.174.133:/opt/ssrm-aiops/
+rsync -av --exclude='.venv' --exclude='node_modules' --exclude='.git' ./ root@124.222.174.133:/opt/agent-gatekeeper/
 # .env 单独 scp，保证它只存在于服务器本地
-scp .env root@124.222.174.133:/opt/ssrm-aiops/.env
+scp .env root@124.222.174.133:/opt/agent-gatekeeper/.env
 
 ssh root@124.222.174.133
-cd /opt/ssrm-aiops
+cd /opt/agent-gatekeeper
 chown -R 10001:10001 data      # 容器内是非 root 用户，Linux 上必须放权，否则写不了向量缓存
 
 # 关键：旧的 systemd 服务还占着 8001，不停掉 compose 会报 "address already in use"
-systemctl stop ssrm-aiops && systemctl disable ssrm-aiops
+systemctl stop agent-gatekeeper && systemctl disable agent-gatekeeper
 
 docker compose up -d --build
 ```
@@ -208,7 +208,7 @@ if (d.detail) { box.innerHTML = '参数错误'; return; }
 ## 附：文件清单
 
 ```
-ssrm-aiops/
+agent-gatekeeper/
 ├── Dockerfile               新增  后端镜像（非 root、健康检查、分层缓存）
 ├── .dockerignore            新增  排除 .env / .venv / frontend
 ├── docker-compose.yml       新增  api + web 两个服务

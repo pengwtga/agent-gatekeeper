@@ -1,30 +1,19 @@
-import { NavLink } from 'react-router-dom'
-
-const NAV = [
-  { to: '/playground', label: '🔍 根因分类' },
-  { to: '/assistant', label: '🛎️ 值班助手' },
-]
-
 /**
- * 公共头部。原实现是把 nav 与 title 拼进 HTML 字符串再返回整页；
- * 现在标题/描述由页面传入，切换路由时 Header 不重新挂载。
- * children 用来塞页面自己的状态徽标（如值班助手页的知识库条数）。
+ * 页面标题区。
+ *
+ * 导航搬到左侧栏之后，这里只剩下「这一页是干什么的」。
+ * 不再用渐变大色块：一页一个渐变块在侧栏布局里会跟导航抢视线，
+ * 且每切一次页就闪一次，值班时反而干扰。
+ * children 用来塞页面自己的状态徽标（如知识库条数、数据更新时间）。
  */
 export default function Header({ title, desc, children }) {
   return (
-    <header>
+    <header className="page-head">
       <div>
         <h1>{title}</h1>
-        <p>{desc}</p>
+        {desc && <p>{desc}</p>}
         {children}
       </div>
-      <nav className="nav">
-        {NAV.map(({ to, label }) => (
-          <NavLink key={to} to={to} className={({ isActive }) => (isActive ? 'active' : undefined)}>
-            {label}
-          </NavLink>
-        ))}
-      </nav>
     </header>
   )
 }

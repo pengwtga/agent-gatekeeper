@@ -1,4 +1,4 @@
-# ssrm-aiops 优化任务清单
+# ssrm-aiops 优化任务清单（仓库现名 agent-gatekeeper）
 
 > 依据：实际仓库 `/Users/pengximei/Desktop/面试/AI研发/ssrm-aiops`（1256 行 Python + React SPA + nginx）
 > 对应方案：`ssrm-aiops_生产化差距与优化方案.md` §1.5 代码体检复核
@@ -11,14 +11,14 @@
 | 批次 | 主题 | 任务数 | 工时 | 一句话目标 |
 |---|---|---|---|---|
 | **T0** | 修 3 个硬伤 + 成本可见 | 4 | **0.5 天** | 消除"读代码就被抓"的风险 |
-| **T1** | 预算、连接、门禁收口 | 5 | 1 天 | 最坏耗时从 180s 降到 12s |
-| **T2** | 可观测 | 4 | 1.5 天 | 出事能拉出完整链路 |
+| **T1** | 预算、连接、门禁收口 | 6 | 1.25 天 | 最坏耗时从 180s 降到 12s |
+| **T2** | 可观测 | 4（+1 遗留） | 1.5 天 | 出事能拉出完整链路 |
 | **T3** | Prompt 版本化 + 回归 | 5 | 1.25 天 | 改 prompt 有据可依 |
 | **T4** | 检索升级 | 6 | 2.5 天 | 从"我说"到"我测" |
 | **T5** | 状态机 + 工具（LangGraph） | 5 | 5 天 | 从分类器变成 Agent |
-| **T6** | 工程卫生 | 4 | 1 天 | 删死代码、补测试 |
+| **T6** | 工程卫生 | 5 | 1.25 天 | 删死代码、补测试、界面外框 |
 | **T7** | 观测与诊断平台化（千问 JD 定向） | 5 | 3 天 | 从"一个应用"变成"平台雏形" |
-| **合计** | | **38** | **约 15.8 天** | |
+| **合计** | | **40** | **约 16.5 天** | |
 
 ---
 
@@ -397,6 +397,12 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", \
 
 **验收**：发一个 `/classify` 请求，1 秒后 `docker restart`，该请求仍返回完整结果。
 
+### T1-6 接真 Provider 后的启动期问题（2 小时，**已完成**）
+
+> 原清单没这项，是接上智谱真 Key 之后暴露的：启动被 embedding 卡 90 秒、
+> 余额不足的 429 被当成限流重试、失败日志 `reason` 是空串、3s 时间片把成功掐成超时。
+> 详见 [`T1-06-startup-and-provider.md`](T1-06-startup-and-provider.md)。
+
 ---
 
 ## T2 · 可观测（1.5 天）
@@ -433,9 +439,62 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", \
 
 **验收**：`/metrics` 能报"过去 1 小时总 token / 单请求均值"。
 
+### T2-5 /eval 改异步任务（0.5 天，**未做**）
+
+**为什么**：`/eval` 30 条串行 × 数秒 = 100s+，超过 nginx 的 `proxy_read_timeout 20s`
+（T1-4）和优雅退出的 25s 窗口（T1-5）。现在必然 504，且重启时必然被 cancel。
+
+**怎么做**：`POST /eval` 立刻返回 `{task_id}`，后台 `asyncio.create_task` 跑；
+`GET /eval/{task_id}` 返回 `{status, progress, result}`。任务态放进程内 dict（单实例够用）。
+
+**验收**：`POST /eval` 200ms 内返回 task_id；轮询能看到 progress 递增；
+nginx 不再出现 504。
+
+**状态**：这是 T1 实测时发现的**架构不匹配**，不属于「可观测」范畴，
+单列出来不混进 T2 的验收计数。
+
+### T2-6 可观测面板（0.5 天，**已完成**）
+
+**为什么**：T2-1~T2-4 的数据全在容器日志和 `/metrics` 的 JSON 里，只有写代码的人能用。
+值班同学看到「变慢了」还是得先来问人。
+
+**怎么做**：
+- 后端 `app/metrics.py` 增加 60 个分钟桶（只存可累加量）+ 最近 50 条请求流水；
+- `/metrics` 返回体加 `series` 与 `recent_requests`，**不新增端点**（只有一个消费方）；
+- 前端 `/observability` 页：6 个 KPI + 4 张趋势图 + 3 组分布 + 请求流水表；
+- 折线图手写 SVG（`TrendChart.jsx`，约 100 行），不引 echarts。
+
+**验收**：`series.points` 恒为 60（含补零）；探针不进流水；
+顶层与折线图错误率/降级率同口径；1440×1400 实测布局无错位。
+
+**文档**：[`T2-06-observability-dashboard.md`](T2-06-observability-dashboard.md)
+
+---
+
+## T2 完成情况（2026-11-12）
+
+| 任务 | 文档 | 验收 |
+|---|---|---|
+| T2-1 trace_id | [`T2-01-trace-id.md`](T2-01-trace-id.md) | 7 项（含并发不串、非法 header 拒绝） |
+| T2-2 JSON 日志 | [`T2-02-json-logs.md`](T2-02-json-logs.md) | 5 项 + 容器实测全行可解析 |
+| T2-3 五个指标 | [`T2-03-metrics.md`](T2-03-metrics.md) | 8 项（含 `/health` 排除、降级按原因） |
+| T2-4 成本归因 | [`T2-04-cost-attribution.md`](T2-04-cost-attribution.md) | 3 项（响应体 / 指标 / 无 Key 场景） |
+| T2-6 可观测面板 | [`T2-06-observability-dashboard.md`](T2-06-observability-dashboard.md) | 接口 3 项 + 页面 4 项（含 2×2 栅格、空状态、口径一致） |
+
+新增模块：`app/obs.py`（trace + 日志 + token 累加器）、`app/metrics.py`。
+新增端点：`GET /metrics`。改动端点：`/classify`、`/assist` 响应体加 `trace_id` + `usage`。
+新增页面：`/observability`（React 路由，走 `/api/metrics`）。
+
+T2-5（`/eval` 改异步）仍**未做**，见上。
+
 ---
 
 ## T3 · Prompt 版本化 + 回归（1.25 天）
+
+> **T3-0 已完成**（详见 [`T3-00-rag-retrieval-eval.md`](T3-00-rag-retrieval-eval.md)）：
+> RAG 检索评测集（常规 30 + 困难 10）+ Recall@1/@3/MRR 指标 + `rag_min_score` 阈值扫描。
+> 结论：困难集上关键词召回 Recall@1 90% → 加 LLM 重排 100%；0.55 是精度不掉的最高覆盖点。
+> T3-2 的 20 条分类回归集可直接复用本任务的评测集结构与跑法。
 
 ### T3-1 `prompts/` 目录 + loader（2 小时）
 
@@ -456,7 +515,7 @@ prompts/
 
 ```makefile
 eval:
-	python -m app.eval 30 --hard
+	python -m app.evaluation.eval 30 --hard
 	python -m app.eval 20 --regression
 ```
 
@@ -580,7 +639,11 @@ c["match_type"] = "keyword"     # 与 "vector" 区分
 
 ## T6 · 工程卫生（1 天）
 
-### T6-1 删 300 行死代码（1 小时）
+### T6-1 删 300 行死代码（1 小时，**部分完成**：已抽出，未删除）
+
+> 现状：340 行页面代码已抽到 `app/pages_legacy.py`，`main.py` 593 → 273 行。
+> 页面本身保留（直连后端时兜底），彻底删除的成本是 1 个文件 + 1 行 `include_router`。
+> 详见 [`T6-01-main-py-slim.md`](T6-01-main-py-slim.md)。
 
 `main.py:206-406`（`/playground`、`/assistant` 两个路由 + `PAGE_CSS`、`PLAYGROUND_CSS`、`ASSISTANT_CSS`、`page_shell`、`COMMON_JS`）。
 
@@ -619,6 +682,15 @@ GitHub Actions：`ruff check` + `pytest`。不搞多版本矩阵。
 | "评测集回归" | 有 CLI 和接口，但容器内 `/eval` 会超时 | 做 T3-3 改成可跑通，或在 README 注明"本地跑 CLI" |
 
 **原则：能花 30 分钟修好的，就去修；修不了的，改措辞。** 不要留着"打开仓库就能验证不成立"的说法——这个仓库是开源的，面试官真的会打开。
+
+### T6-5 左侧栏 + 可观测拆页（2 小时，**已完成**）
+
+> 原清单没这项，是拿面板实际用起来之后补的：一页塞 6 KPI + 4 图 + 3 组分布 + 50 行流水，
+> 值班时必须滚两屏；导航还是每页顶部平铺的胶囊，表达不了「可观测」下面的层级。
+>
+> 结果：导航抽成 `Layout` 外框，可观测按「看的时间点」拆成 概览 / 请求流水 / 质量分析 三个子路由，
+> 数据在 shell 层只轮询一次、子页用 context 取。
+> 详见 [`T6-05-ui-shell-and-obs-split.md`](T6-05-ui-shell-and-obs-split.md)。
 
 ---
 
@@ -672,7 +744,11 @@ diff = {k: (rec["result"].get(k), got.get(k))
 
 **边界**：录制含工单文本，开源仓库必须脱敏。做法是正则打码（手机号/邮箱/单号）+ `data/recordings/` 进 `.gitignore`，仓库里只放 `examples/recordings.sample.jsonl`（手工构造 3 条）。
 
-### T7-2 trace 落 SQLite + 查询接口（1 天）
+### T7-2 trace 落 SQLite + 查询接口（1 天，**一阶段完成**）
+
+> 一阶段（内存版）已落地：`app/tracing.py` 收集 span，`GET /traces/{id}` 查单条链路，
+> 面板点 trace_id 出瀑布图。剩余：落 SQLite、`GET /traces` 列表与筛选。
+> 详见 [`T7-02-trace-spans.md`](T7-02-trace-spans.md)。
 
 | 项 | 内容 |
 |---|---|

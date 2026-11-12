@@ -30,3 +30,9 @@ export const assist = (question) =>
 export const kbStats = () => request('/kb/stats')
 
 export const health = () => request('/health')
+
+// 指标快照：含累计计数、滑动窗口分位数、60 分钟时序、最近 50 条请求流水
+export const fetchMetrics = () => request('/metrics')
+
+// 单次请求链路：各阶段 span 与耗时。查不到时后端返回 404（已滚出窗口）
+export const fetchTrace = (traceId) => request(`/traces/${encodeURIComponent(traceId)}`)
