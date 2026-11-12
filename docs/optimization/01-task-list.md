@@ -17,7 +17,8 @@
 | **T4** | 检索升级 | 6 | 2.5 天 | 从"我说"到"我测" |
 | **T5** | 状态机 + 工具（LangGraph） | 5 | 5 天 | 从分类器变成 Agent |
 | **T6** | 工程卫生 | 4 | 1 天 | 删死代码、补测试 |
-| **合计** | | **33** | **约 12.8 天** | |
+| **T7** | 观测与诊断平台化（千问 JD 定向） | 5 | 3 天 | 从"一个应用"变成"平台雏形" |
+| **合计** | | **38** | **约 15.8 天** | |
 
 ---
 
@@ -28,6 +29,9 @@
 | **A｜保命** | 面试就在本周 | T0 全部 → T6-4 → T6-1 | **半天** |
 | **B｜扎实** | 还有两周 | T0 → T1 → T3 → T2 → T4 | 6.5 天 |
 | **C｜完整** | 有一个月，想彻底补齐 | A → B → T5 → T6 | 12.5 天 |
+| **D｜定向千问** | 面「Agent 观测与诊断平台」岗 | T0 → T1 → T2 → T7 全部 → T3-2 | **6.5 天** |
+
+**路径 D 的取舍**：T5（LangGraph 多步 Agent）可以整批砍掉——那个岗位要的是"能诊断别人的 Agent"，不是"自己会写多步 Agent"；反过来 T7（回放、trace 落库、OTel、反馈闭环、六类故障规则）必须全做，因为那五件事逐条对着 JD 的职责 2/3/4/5。
 
 **强烈建议先走 A。** 理由：T0-1 和 T6-4 是"表述与代码不符"的风险，面试官打开仓库就能验证，**这个损失是信任层面的，不是技术层面的**。半天就能消掉。
 
@@ -333,13 +337,13 @@ logger.info("LLM 连接池已关闭")
 
 ---
 
-### T1-4 nginx 超时与后端对齐（0.5 小时）
+### T1-4 nginx 超时与后端对齐（0.5 小时，实际扩展到 1.5 小时）
 
 | 项 | 内容 |
 |---|---|
 | **为什么** | `proxy_read_timeout 120s` 是"允许挂 2 分钟"，而 T1-1 之后后端承诺 12s 内必返回。两者语义不一致，且 120s 会让慢请求长期占连接 |
-| **改哪里** | `frontend/nginx.conf:17-19` |
-| **工时** | 30 分钟 |
+| **改哪里** | `frontend/nginx.conf` |
+| **工时** | 30 分钟（+ 1 小时做 upstream keepalive / 限流 / 429 同构） |
 
 ```nginx
 # 后端承诺单请求 12s 内返回（见 settings.request_budget_ms），留 8s 余量
@@ -348,7 +352,27 @@ proxy_send_timeout 20s;
 proxy_read_timeout 20s;
 ```
 
-**验收**：artificially 让某接口 sleep 30s，nginx 在 ~20s 返回 504，后端日志显示主动放弃。
+**同一轮顺带补的四处**（都是配置层，不改代码）：
+
+| 补什么 | 为什么 |
+|---|---|
+| `upstream` + `keepalive 32` + `proxy_set_header Connection ""` | 不加则每个请求新建到后端的 TCP 连接，长连接池形同虚设 |
+| `limit_req_zone` + `limit_req burst=5 nodelay` | 应用层限流是进程内计数，**多 worker 后各算各的等于没限**；nginx 的漏桶在 worker 间共享 |
+| `client_max_body_size 2m` | 默认 1m，显式写出来避免以后支持日志上传时莫名 413 |
+| `error_page 429 = @rate_limited` 返回 JSON | nginx 默认 429 是 HTML，前端 `res.json()` 解析失败只能显示 "HTTP 429" |
+
+**验收**（容器实测，非推演）：
+
+```
+nginx -t                                    → syntax is ok
+GET /api/classify                           → 200（反代通）
+连续 7 次                                    → 200×6 后 429（rate 20r/m + burst 5）
+429 响应                                     → Content-Type: application/json
+                                              {"detail":"请求过于频繁，请稍后再试"}
+                                              Retry-After: 3
+```
+
+坑：`add_header` 默认只对 2xx/3xx 生效，429 要加 `always` 才会带上 `Retry-After`。
 
 ---
 
@@ -598,6 +622,168 @@ GitHub Actions：`ruff check` + `pytest`。不搞多版本矩阵。
 
 ---
 
+## T7 · 观测与诊断平台化（3 天，千问 JD 定向）
+
+> **为什么单开一批**：T0–T6 的目标是"把一个 Agent 做到生产可用"；T7 的目标是"把定位问题的过程变成平台能力"。
+> 前者是应用工程，后者是**诊断平台**。JD 六条职责里有四条（2/3/4/5）落在这一批。
+>
+> 这一批的共同设计前提：**诊断结论必须带证据、可回放、可被人工推翻**。没有这三点的"智能诊断"就是猜。
+
+### T7-1 请求录制与回放（0.5 天）
+
+| 项 | 内容 |
+|---|---|
+| **为什么** | 线上问题的第一句话永远是"能复现吗"。现在的 `/eval` 只跑固定数据集，真出事时那条请求的入参、模型原始输出、最终结论都没有留痕，**问题只能靠当事人回忆** |
+| **改哪里** | 新增 `app/recorder.py`、`scripts/replay.py`；`main.py` 两个入口各加一行 |
+| **工时** | 半天 |
+
+**录制什么**（一条 JSONL 一行，按天分文件 `data/recordings/2026-11-12.jsonl`）：
+
+```json
+{"trace_id":"t_7f3a","ts":"2026-11-12T10:21:03Z","endpoint":"/classify",
+ "input":{...},"llm_raw":{"provider":"deepseek","content":"{...}","finish_reason":"stop"},
+ "result":{"root_cause_class":"ea_sync_timeout","confidence":0.92},
+ "meta":{"budget_ms":3118,"degraded":false,"tokens_in":412,"tokens_out":86}}
+```
+
+**两个关键设计**：
+
+1. **录 `llm_raw` 而不是只录 `result`**。只录结果，回放时无法区分"模型本来就这么答"和"你的解析/校验改坏了"。录原始 content 才能定位到是模型层还是代码层。
+2. **写盘丢线程池**（`asyncio.to_thread`），不阻塞事件循环；失败只记日志不抛——**录制是旁路，不能影响主流程**。
+
+**回放怎么做**（不去打真 LLM）：
+
+```python
+# scripts/replay.py 核心：把录制里的 llm_raw 塞回客户端，复跑同一套逻辑
+class ReplayLLM:
+    def __init__(self, rec): self.rec = rec
+    async def chat_json(self, system_prompt, user_payload, budget=None):
+        return json.loads(self.rec["llm_raw"]["content"]) | {"_provider": "replay"}
+
+cls = RootCauseClassifier(ReplayLLM(rec))
+got = await cls.classify(rec["input"])
+diff = {k: (rec["result"].get(k), got.get(k))
+        for k in rec["result"] if rec["result"].get(k) != got.get(k)}
+```
+
+**验收**：
+- 20 条录制回放，除 `latency` / `tokens` 外字段 **100% 一致**（证明回放保真）
+- 故意把 `min_evidence_score` 从 0.35 改到 0.9，回放一致率下降且 diff 能列出**哪几条结论变了** —— 这一步才是回放的真正用途：**改判定逻辑前先跑一遍历史流量，看会影响谁**
+
+**边界**：录制含工单文本，开源仓库必须脱敏。做法是正则打码（手机号/邮箱/单号）+ `data/recordings/` 进 `.gitignore`，仓库里只放 `examples/recordings.sample.jsonl`（手工构造 3 条）。
+
+### T7-2 trace 落 SQLite + 查询接口（1 天）
+
+| 项 | 内容 |
+|---|---|
+| **为什么** | 现在 trace 只在日志里，**按 trace_id 拼不出完整链路**（跨 provider 重试、降级、证据门禁是散在 4 个模块的 print）。JD 第 2 条要的是"从用户任务到具体执行步骤的问题追踪" |
+| **改哪里** | 新增 `app/trace_store.py`；`main.py` 加 `/traces/{id}`、`/traces`；`llm_client` 每次尝试产一个 span |
+| **工时** | 1 天 |
+
+**表结构**（两张表就够，别上 span 表 + 事件表 + 属性表的完整 OTel 模型）：
+
+```sql
+CREATE TABLE traces (
+  trace_id TEXT PRIMARY KEY, ts TEXT, endpoint TEXT, status TEXT,
+  duration_ms INTEGER, degraded INTEGER, provider TEXT,
+  tokens_in INTEGER, tokens_out INTEGER,
+  root_cause_class TEXT, confidence REAL, error TEXT
+);
+CREATE TABLE spans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, trace_id TEXT, seq INTEGER,
+  name TEXT,              -- retrieve | llm.call | evidence.gate | rule_baseline
+  start_ms INTEGER, end_ms INTEGER, status TEXT,
+  attrs TEXT              -- JSON：provider/model/http_status/retry/finish_reason
+);
+```
+
+**三个必须先想清楚的工程问题**（面试就问这些）：
+
+| 问题 | 做法 | 不这么做的后果 |
+|---|---|---|
+| 写库会不会拖慢请求 | `asyncio.Queue(maxsize=1000)` + 单消费者协程批量提交（50 条或 200ms 触发） | 同步 `commit` 每次 fsync，请求尾延迟 +5~20ms |
+| 队列满了怎么办 | **丢弃 + 计数 + `/metrics` 暴露 dropped** | 无限队列 = 内存泄漏；阻塞 = 用观测拖垮主流程 |
+| 单机 SQLite 能不能扛 | 能，WAL 模式下写不阻塞读；但**多 worker 会锁争用**，那时换 PG | 直接上 PG 是过度设计，面试要说清这条分界线 |
+
+**验收**：
+- 一次 `/classify`（含一次 provider 失败、一次降级）后，`GET /traces/{id}` 返回**按 seq 排序的 span 序列**，能看出"第一个 provider 3s 超时 → 切第二个成功 → 证据门禁 0.12 压置信度"
+- `GET /traces?limit=50&status=degraded` 能筛出降级请求
+- 压 200 并发后 `dropped=0`、P95 尾延迟增量 < 5ms
+
+### T7-3 接入 OpenTelemetry（0.5 天）
+
+| 项 | 内容 |
+|---|---|
+| **为什么** | JD 加分项明写 OTel / 分布式链路追踪。自研 trace 能证明你懂原理，但**接标准协议**能证明你的东西能被别人的平台消费——这是"平台"和"小工具"的分界 |
+| **改哪里** | 新增 `app/otel.py`；`main.py` lifespan 初始化；`llm_client` 的 span 加 `gen_ai.*` 属性 |
+| **工时** | 半天 |
+
+**做法**：`FastAPIInstrumentor` 自动埋点 + 手动 span 包 LLM 调用，**属性用 GenAI 语义约定**（这是加分细节，很多人不知道已经有了）：
+
+```python
+span.set_attribute("gen_ai.system", "openai")          # 供应商族
+span.set_attribute("gen_ai.request.model", provider.model)
+span.set_attribute("gen_ai.usage.input_tokens", usage["prompt_tokens"])
+span.set_attribute("gen_ai.usage.output_tokens", usage["completion_tokens"])
+span.set_attribute("gen_ai.response.finish_reasons", [choice.get("finish_reason")])
+```
+
+**关键取舍**：**不替换自研 trace**。OTel 是导出通道，SQLite 是本地存储，两者用同一个 trace_id 关联——没配 `OTEL_EXPORTER_OTLP_ENDPOINT` 时自动降级为 no-op，本地开发零依赖。
+
+**验收**：`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317` + jaeger all-in-one，`/classify` 一次后在 Jaeger 里看到 `POST /classify` → `llm.call` 两层 span，且 LLM span 带 token 属性；不配环境变量时 trace 表照常写、无报错。
+
+### T7-4 诊断反馈闭环（0.5 天）
+
+| 项 | 内容 |
+|---|---|
+| **为什么** | 现在"准确率"只有一个数，来源是固定评测集。JD 第 1 条要求"处理反馈"、第 4 条要求"诊断准确率"。**没有采纳/推翻记录的准确率，是自评，不是度量** |
+| **改哪里** | `trace_store` 加表；`main.py` 加 `POST /diagnosis/{trace_id}/feedback`、`GET /metrics/diagnosis`；前端结果卡片加两个按钮 |
+| **工时** | 半天 |
+
+```sql
+CREATE TABLE diagnosis_feedback (
+  trace_id TEXT, verdict TEXT,          -- accepted | rejected | corrected
+  corrected_class TEXT, operator TEXT, note TEXT, ts TEXT
+);
+```
+
+**判定口径**（这段必须写清，否则准确率是假的）：
+
+| verdict | 含义 | 计入 |
+|---|---|---|
+| `accepted` 且 `corrected_class` 为空 | 人工认可原结论 | TP |
+| `corrected` 且给了新类别 | 结论错、类别被改 | FP，且进混淆矩阵 |
+| `rejected`（结论错但说不出正确类别） | 至少判定为不可用 | FP（弱标签） |
+
+> 准确率 = `accepted / (accepted + corrected + rejected)`，**并且必须同时报样本量**。只报 92% 不报 n=12 的，都是耍流氓。
+
+**验收**：造 12 条反馈（8 accepted / 3 corrected / 1 rejected）→ `/metrics/diagnosis` 返回 0.667 且按类别列出错误分布；`corrected` 的记录能反查原 trace 的 evidence，看是"证据不足"还是"规则判错"。
+
+### T7-5 六类 Agent 故障的诊断规则（0.5 天）
+
+| 项 | 内容 |
+|---|---|
+| **为什么** | JD 第 3 条点名六类故障：**任务失败、执行超时、重复执行、工具调用异常、上下文处理异常、Token 消耗异常**。你项目里这些信号全都有，但**散在各处、没有一条规则把它们变成结论** |
+| **改哪里** | 新增 `app/diagnosis_rules.py`（纯函数，无 IO，可单测）；`/traces/{id}/diagnose` 复用 |
+| **工时** | 半天 |
+
+**规则表**（每一行都是"信号 → 判定 → 证据字段"，直接可落代码）：
+
+| 故障类型 | 可观测信号 | 判定条件 | 证据字段 |
+|---|---|---|---|
+| **执行超时** | `budget.remaining_ms` 归零、span 被跳过 | 存在 `status=skipped_budget` 的 span | `budget_ms`、`elapsed` |
+| **任务失败** | `degraded=true`、全 provider 失败 | `provider_failures == len(chain)` | 每个 provider 的 http_status |
+| **重复执行** | 同 `idempotency_key` 在窗口内多次出现 | 5 分钟内同 key ≥2 次 | 两次 trace_id |
+| **工具调用异常** | span `tool.call` 非 2xx 或超时 | `tool.status != 200` | 工具名、错误码、参数摘要 |
+| **上下文处理异常** | `tokens_in > 窗口 × 0.8`、检索为空仍生成 | `tokens_in` 突增 或 `retrieved==0 && answer 非空` | tokens_in、top_k 命中数 |
+| **Token 消耗异常** | 单请求 tokens 超 P99、`finish_reason=length` | `tokens > 3×median` 或 被 max_tokens 截断 | tokens_in/out、finish_reason |
+
+**验收**：构造 24 条 span 序列（每类 4 条，含 2 条正常样本做负例）→ 规则命中率 ≥ 90%、**误报 ≤ 1 条**；每条结论必须带 `evidence` 字段（复用 T0-3 的思路：**说得出是哪条 span、哪个字段**）。
+
+> 注意：这一项刻意做成**纯规则、不用 LLM**。理由写在文档里——六类故障的判定边界是确定的（超时就是超时），用 LLM 反而引入不确定性；**LLM 该用在"规则判不出来但需要归因"的那部分**（比如"用户说卡住了但我看不出哪一步错"）。这个"哪里用规则、哪里用模型"的划分，是这一项最值得讲的东西。
+
+---
+
 ## 依赖关系
 
 ```
@@ -620,6 +806,11 @@ T4-5、T4-6 独立
 
 T5-* 依赖 T1-1 + T4-3（要做效果对比，得有检索评测）
 T6-* 独立，随时可做
+
+T7-1 ──> T7-4（回放依赖录制；反馈要能挂到具体 trace）
+T2-1 ──> T7-2 ──> T7-3（trace span 是 OTel 属性和 SQLite 落库的共同上游）
+T7-2 ──> T7-5（规则判定读 span 序列）
+T7-1、T7-4 可用录制 + 规则先跑通，不强依赖 T2
 ```
 
 ---
@@ -646,6 +837,11 @@ T6-* 独立，随时可做
 | `frontend/nginx.conf` | T1-4 | 超时对齐 |
 | `docker-compose.yml` / `Dockerfile` | T1-5 | 优雅退出 |
 | `app/agent_graph.py` | T5-1~5 | **新增** |
+| `app/recorder.py` | T7-1 | **新增**（录制，丢线程池） |
+| `scripts/replay.py` | T7-1 | **新增**（回放 + diff） |
+| `app/trace_store.py` | T7-2、T7-4 | **新增**（SQLite + 异步批量写） |
+| `app/otel.py` | T7-3 | **新增**（OTLP，未配置则 no-op） |
+| `app/diagnosis_rules.py` | T7-5 | **新增**（六类故障规则，纯函数） |
 
 ---
 
