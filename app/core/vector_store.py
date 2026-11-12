@@ -1,7 +1,7 @@
 """轻量向量存储 — NumPy 余弦相似度
 
 设计取舍（面试可讲）：
-- 知识库规模 < 1000 条时，NumPy 暴力余弦检索毫秒级完成，无需引入 Faiss/Chroma
+- 实测（scripts/vector_bench.py，dim=512）：万条级 p50 <1ms、十万条级才需换 Faiss/ANN
 - 接口与向量库对齐（add / search），后续规模上来可无缝替换为持久化方案
 - 向量与文档一起持久化为 JSONL，服务重启不丢
 """
