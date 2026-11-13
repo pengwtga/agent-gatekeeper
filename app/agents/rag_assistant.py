@@ -24,20 +24,14 @@ from app.core.llm_client import LLMClient
 from app.domains import AssistantSpec
 from app.observability.tracing import span
 from app.core.vector_store import InMemoryVectorStore
+from app.prompts import load as load_prompt
 
 logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent.parent.parent / "data"  # app/agents/ → 项目根
 
-# system prompt 模板：{intro} 由领域的 AssistantSpec.role_intro 注入，
+# prompt 模板在 prompts/（T3-1）：{role_intro} 由 AssistantSpec 注入，{id_field} 是该领域的条目 ID 字段名。
 # 规则部分（不编造/指出差异/不硬答/JSON 输出）是机制层的，属于引擎不随领域变
-SYSTEM_PROMPT_TMPL = """你是{intro}。用户遇到问题时会来问你。
-你会收到：①用户的提问；②知识库中检索到的相似历史案例（含现象、类别、处置过程/话术）。
-任务：基于历史案例给出建议。规则：
-1. 优先参考历史案例的实际处置方式，不要凭空编造系统或流程里不存在的操作
-2. 如果历史案例与当前问题不完全一致，明确指出差异
-3. 如果检索结果都不相关，直接说不确定，建议升级人工——不要硬答
-4. 只输出 JSON：{{"answer": "建议（150字内，分步骤）", "confidence": 0.0, "based_on": [引用的 {id_field}]}}"""
 
 
 def _default_spec() -> AssistantSpec:
@@ -49,6 +43,9 @@ class RagAssistant:
     def __init__(self, llm: LLMClient, spec: Optional[AssistantSpec] = None):
         self.llm = llm
         self.spec = spec or _default_spec()
+        # prompt 外置（T3-1）：构造即加载，配置错误在启动阶段暴露
+        self._answer_prompt = load_prompt("rag_answer")
+        self._rerank_prompt = load_prompt("rag_rerank")
         self.store = InMemoryVectorStore()
         self.docs: list[dict[str, Any]] = []
         self._doc_grams: Optional[list[frozenset[str]]] = None
@@ -155,9 +152,9 @@ class RagAssistant:
                       + f'\n\n请选出与提问最相关的至多 {top_k} 条，按相关性降序。'
                         '只输出 JSON：{"order": [cand_id, ...]}')
             with span("rag.rerank", candidates=len(candidates)) as s:
+                s["attrs"]["prompt_version"] = self._rerank_prompt.label
                 result = await self.llm.chat_json(
-                    "你是检索重排序器。只依据问题与工单的语义相关性排序，不要编造。",
-                    prompt, budget=budget)
+                    self._rerank_prompt.text, prompt, budget=budget)
                 order = [int(i) for i in result.get("order", []) if isinstance(i, int) and 0 <= i < len(candidates)]
                 s["attrs"]["ordered"] = len(order)
             if not order:
@@ -220,8 +217,8 @@ class RagAssistant:
                       "类别": h[class_f],
                       "处置过程": h["resolution"]} for h in hits],
                     ensure_ascii=False)
-                system_prompt = SYSTEM_PROMPT_TMPL.format(
-                    intro=spec.role_intro or "智能助手", id_field=id_f)
+                system_prompt = self._answer_prompt.render(
+                    role_intro=spec.role_intro or "智能助手", id_field=id_f)
                 with span("rag.answer", hits=len(hits)) as s:
                     result = await self.llm.chat_json(
                         system_prompt, f"提问：{question}\n\n相似历史案例：{context}", budget=budget)
@@ -230,6 +227,7 @@ class RagAssistant:
                                       class_f: h[class_f],
                                       "score": h["score"]} for h in hits]
                 result["mode"] = self.mode
+                result["prompt_version"] = self._answer_prompt.label
                 result["llm_provider"] = result.pop("_provider", "unknown")
                 return result
             except Exception as e:

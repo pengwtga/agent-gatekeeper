@@ -124,7 +124,7 @@ python -m app.evaluation.rag_eval                  # RAG 检索评测
 
 ## 数据集
 
-数据按领域分目录：`data/ssrm/`（运维值班）、`data/csa/`（电商客服）、`data/credit/`（信贷风控），与 `app/domains/` 领域包一一对应。
+数据按领域分目录：`data/ssrm/`（运维值班）、`data/csa/`（电商客服）、`data/credit/`（信贷风控），与 `app/domains/` 领域包一一对应。每个文件的命名含义、schema 与数据量评估详见 [docs/data-catalog.md](docs/data-catalog.md)。
 
 **SSRM（运维值班）**
 
@@ -134,7 +134,8 @@ python -m app.evaluation.rag_eval                  # RAG 检索评测
 | `data/ssrm/incidents_hard.jsonl` | 25 条困难事件：改写表述、无 error_code、口语化描述 | 检验 LLM 相对规则基线的泛化差距 |
 | `data/ssrm/kb_tickets.jsonl` | 150 条历史 oncall 工单（30 手工 + 120 变体；现象/根因/处置） | SSRM 值班助手知识库；生成器 `scripts/gen_assistant_data.py` 固定种子 |
 | `data/ssrm/rag_queries.jsonl` | 150 条值班口吻提问（对 symptom 改写） | SSRM 检索评测（查询 → 应命中条目/簇） |
-| `data/ssrm/rag_queries_hard.jsonl` | 40 条同义词替换/去黑话提问 | 打关键词召回的语义鸿沟 |
+| `data/ssrm/rag_queries_hard.jsonl` | 130 条（10 手工 + 120 变体）去黑话/口语化提问 | 打关键词召回的语义鸿沟 |
+| `data/ssrm/regression.jsonl` | 20 条手工回归集（5 类 × 4，含 2 条证据门禁探针） | prompt 版本对比的尺子，`make eval` 跑它 |
 
 **CSA（电商客服）**
 
@@ -159,7 +160,14 @@ python -m app.evaluation.rag_eval                  # RAG 检索评测
 ## 评测
 
 ```bash
+make eval      # 回归集（20 条手工，含证据探针）+ 困难集，分数按 prompt 版本归档
+make eval-rag  # 三域检索评测（调 LLM 重排）
+make calibrate # 证据判据标定（纯本地，不调 LLM）
+make prompts   # prompts/ 自检（active 指针 / 文件 / 占位符声明）
+
 python -m app.evaluation.eval            # SSRM 分类常规集（LLM 通道）
+python -m app.evaluation.eval --regression --record  # 回归集，分数写入 prompts/scores.json
+python -m app.evaluation.eval --regression --prompt-version=v1  # A/B：用 v1 prompt 跑同一批样本
 python -m app.evaluation.eval 30 --hard  # 分类困难集
 python -m app.evaluation.eval 30 --rule  # 规则基线对照
 python -m app.evaluation.eval 30 --domain csa       # 电商客服领域（同引擎换包）
@@ -173,6 +181,10 @@ python -m app.evaluation.rag_eval --domain credit # 催员辅助域
 python -m app.evaluation.rag_eval --rerank   # 对齐线上降级模式（调 LLM）
 python -m app.evaluation.rag_eval --sweep    # 采信阈值扫描表
 ```
+
+**Prompt 版本化**（[docs/optimization/T3-01](docs/optimization/T3-01-prompt-versioning.md)）：三处 prompt 都在 `prompts/`（`index.json` 的 `active` 指针选版本），服务启动时校验「声明的占位符 == 文本实际占位符」，不一致直接启动失败；`/health` 暴露当前三版本，`/classify`、`/assist` 结果自带 `prompt_version`。
+
+**证据校验**（[docs/optimization/T3-02](docs/optimization/T3-02-evidence-refs.md)）：`root_cause.v2` 要求模型输出 `evidence_refs`（字段 + 值），门禁校验「字段存在吗、值相等吗」，得分与文本长短无关；模型不按 schema 输出时回退 v1 的字面匹配。`/classify` 返回逐条引用明细（`ok` / `actual`），前端渲染成可复核的引用条。v2 基线：回归 0.95 / 困难 0.96（[分数表](prompts/scores.json)）。
 
 ## 目录结构
 
@@ -216,8 +228,10 @@ agent-gatekeeper/
 ├── Dockerfile         # 后端镜像（非 root、HEALTHCHECK、分层缓存）
 ├── docker-compose.yml # api + web 一键起
 ├── data/              # 评测集与知识库，按领域分目录（ssrm/ csa/ credit/，见「数据集」一节）
+├── prompts/           # prompt 模板（index.json 定 active 版本，启动校验，见「评测」一节）
 ├── docs/               # 架构图 + 页面截图 + 改造文档（optimization/）+ 设计决策（design-decisions.md）
 ├── scripts/            # 数据集生成脚本（固定种子可复现）
+├── Makefile            # make eval / eval-rag / prompts
 ├── .env.example
 └── requirements.txt
 ```

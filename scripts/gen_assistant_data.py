@@ -3,7 +3,7 @@
 产出（全部幂等：手工金样本永远保留，生成物可随时重刷）：
 1. data/ssrm/kb_tickets.jsonl            30 条手工金样本 + 120 条变体 = 150 条（SSRM 值班助手）
 2. data/ssrm/rag_queries.jsonl           30 条手工 + 120 条变体查询 = 150 条（每变体一条，带区分 token）
-3. data/ssrm/rag_queries_hard.jsonl      10 条手工 + 30 条变体困难查询 = 40 条
+3. data/ssrm/rag_queries_hard.jsonl      10 条手工 + 120 条变体困难查询 = 130 条
 4. data/csa/csa_agent_kb.jsonl           100 条坐席助手 SOP/话术（新增）
 5. data/credit/credit_collection_kb.jsonl 120 条催员辅助话术/合规红线（新增）
 6. data/csa/csa_kb_queries.jsonl         40 条坐席助手检索评测

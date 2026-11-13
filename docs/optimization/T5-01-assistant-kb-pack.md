@@ -37,7 +37,7 @@ KB 从 30 扩到 150 后，原始字符 unigram 打分的簇级 Recall@1 从 100
 | csa_agent_kb.jsonl | 100（5 类 × 20） | 坐席助手 SOP/话术，含红线（不当评判商家、不虚开金额） |
 | credit_collection_kb.jsonl | 120（5 类 × 24） | 催员辅助：早期提醒/承诺跟进/困难协商/失联找回/**合规红线** |
 | rag_queries.jsonl | 150 | 检索评测（每变体一条，含区分 token） |
-| rag_queries_hard.jsonl | 40 | 去黑话 + 口语化 |
+| rag_queries_hard.jsonl | 130（10 手工 + 120 变体） | 去黑话 + 口语化，与变体一一对应 |
 | csa_kb_queries.jsonl / credit_kb_queries.jsonl | 各 40 | 两域检索评测 |
 | csa_tickets.jsonl | 150（30 手工 + 120 合成） | CSA 分类评测集扩充，规则 100% |
 

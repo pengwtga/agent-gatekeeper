@@ -46,8 +46,18 @@ class Settings(BaseSettings):
 
     # 分类 Agent
     min_confidence_for_auto_action: float = 0.85  # 置信度低于此值 → 建议人工确认
-    min_evidence_score: float = 0.35  # 证据可回溯度低于此值 → 视为无据，压置信度转人工（阈值标定见 docs/optimization/T0-03）
+    min_evidence_score: float = 0.35  # 【兜底判据】字面匹配可回溯度低于此值 → 无据（阈值标定见 docs/optimization/T0-03）
+    # 【主判据】结构化引用（T3-5）：有效引用占比 + 引用条数双条件
+    # 为什么还要条数下限：只引 1 个正确字段就能拿 1.0 分，等于奖励「少说少错」，
+    # 这正是 T0-03 里分数反转的根源（J 极简 1.000 > A 详述 0.684）。条数下限把这条路堵掉。
+    min_evidence_refs_score: float = 0.7  # 标定见 docs/optimization/T3-02：诚实样本 1.0 / 纯编造 0.0
+    min_evidence_refs: int = 2
     low_evidence_confidence_cap: float = 0.4  # 无据时的置信度上限
+
+    # Prompt 版本化（T3-1）：留空用仓库内 prompts/，可指向外部目录做 A/B 或多环境部署
+    prompts_dir: str = ""
+    # A/B 或紧急回滚：{"root_cause": "v1"} 覆盖 index.json 的 active 指针，不改仓库文件
+    prompts_active: dict[str, str] = {}
 
     # 服务
     api_port: int = 8001

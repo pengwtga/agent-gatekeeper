@@ -24,6 +24,8 @@
 | [`T2-04-cost-attribution.md`](T2-04-cost-attribution.md) | 请求级 token 归因 |
 | [`T2-06-observability-dashboard.md`](T2-06-observability-dashboard.md) | 可观测面板（分钟级趋势 + 请求流水） |
 | [`T3-00-rag-retrieval-eval.md`](T3-00-rag-retrieval-eval.md) | RAG 检索评测（Recall/MRR + 阈值扫描，T3 前置） |
+| [`T3-01-prompt-versioning.md`](T3-01-prompt-versioning.md) | Prompt 版本化（index + 启动校验 + 结果留痕）+ 20 条回归集 + `make eval` |
+| [`T3-02-evidence-refs.md`](T3-02-evidence-refs.md) | 证据判据换结构化引用（消除分数反转），v1/v2 回归对比 + 标定脚本 |
 | [`T5-00-domain-pack-and-tools.md`](T5-00-domain-pack-and-tools.md) | 泛化三件事：Domain Pack 剥离 + 工具调用层 + CSA 第二领域验证 |
 | [`T5-01-assistant-kb-pack.md`](T5-01-assistant-kb-pack.md) | 助手知识库 Pack 化（AssistantSpec）+ 三域 KB/评测集扩充 + bigram 打分改造 |
 | [`T1-06-startup-and-provider.md`](T1-06-startup-and-provider.md) | 接真 Provider 后暴露的启动期问题（预热阻塞 / 429 误判 / 空 reason） |
@@ -39,7 +41,7 @@
 | **T0** | 修 3 个硬伤 + 成本可见 | ✅ 已完成（17 项验收全通过） |
 | **T1** | 预算、连接、门禁收口 | ✅ 已完成（19 项验收全通过；T1-4 容器实测 nginx -t / 反代 / 限流 429 / Retry-After，T1-5 容器实测四个退出场景；T1-6 接真 Provider 后补 7 项启动期验收） |
 | **T2** | 可观测 | ✅ 已完成（24 项验收全通过；容器实测 `docker logs` 逐行可解析 JSON；T2-6 面板已上页，接口 + 页面共 7 项验收） |
-| T3 | Prompt 版本化 + 回归 | ⏳ T3-0 已完成（检索评测集 + Recall/MRR + 0.55 阈值扫描），T3-1~5 未做 |
+| T3 | Prompt 版本化 + 回归 | ✅ 全部完成：T3-0 检索评测集 + Recall/MRR + 阈值扫描；T3-1~4 prompts/ + 启动校验 + 20 条回归集 + `make eval`；T3-5 证据改结构化引用（v2 基线：回归 0.95 / 困难 0.96，回归集门禁误杀 3→0） |
 | T4 | 检索升级 | ⬜ |
 | T5 | 状态机 + 工具（LangGraph） | ⏳ T5-0 已完成（自研工具层 + Domain Pack + CSA 领域 96.7%），LangGraph 状态机未做 |
 | T6 | 工程卫生 | ⏳ T6-1 已完成（main.py 593 → 273 行），T6-5 已完成（左侧栏 + 可观测拆页），T6-6 已完成（app/ 分包），T6-2~4 未做 |

@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from app.core.budget import Budget
 from app.core.builtin_tools import build_default_registry
 from app.core.tools import choose_and_run
+from app import prompts
 from app.agents.classifier import RootCauseClassifier
 from app.domains.credit import pack as credit_pack
 from app.domains.csa import pack as csa_pack
@@ -56,12 +57,15 @@ registry = build_default_registry(rag)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Prompt 版本校验（T3-1）：active 指针、文件、占位符声明三者必须自洽。
+    # 放在启动而不是 import：单测 import 不该被 prompts/ 绊倒，但带病启动比起不来更糟
+    prompt_versions = prompts.validate()
     providers = ",".join(llm_client.configured_providers) if llm_client.is_configured else "未配置(规则基线降级)"
     logger.info(
         "SSRM Ops Agent 启动",
         extra={
             "event": "app_start", "stage": "boot",
-            "provider": providers, "reason": f"budget={settings.request_budget_ms}ms per_try={settings.llm_timeout_per_try_ms}ms",
+            "provider": providers, "reason": f"budget={settings.request_budget_ms}ms per_try={settings.llm_timeout_per_try_ms}ms prompts={prompt_versions}",
             "outcome": "ok",
         },
     )
@@ -193,6 +197,7 @@ async def health():
         "llm_usage": llm_client.usage,   # 进程累计 token 用量，成本可见的最小实现
         "classes": list(ssrm_pack.classes.keys()),
         "assistants": {name: a.mode for name, a in assistants.items()},
+        "prompts": prompts.active_versions(),   # T3-4：当前生效的 prompt 版本，一眼可见
     }
 
 

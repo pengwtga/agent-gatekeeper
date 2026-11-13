@@ -1,0 +1,42 @@
+{
+  "root_cause": {
+    "active": "v2",
+    "versions": {
+      "v1": {
+        "file": "root_cause.v1.md",
+        "created": "2026-11-13",
+        "note": "从 classifier._build_system 外置，文本逐字保留，行为不变",
+        "vars": ["role_intro", "domain", "classes", "n_classes"]
+      },
+      "v2": {
+        "file": "root_cause.v2.md",
+        "created": "2026-11-13",
+        "note": "T3-5 结构化引用：输出增加 evidence_refs（字段+值），证据门禁改用 check_refs 判据；v1 保留用于逐字回滚与 A/B",
+        "vars": ["role_intro", "domain", "classes", "n_classes"],
+        "post_example": "输出形态必须与下面这条完全一致（evidence_refs 至少 2 项，字段名与值都来自输入）：\n{\"root_cause_class\": \"ea_sync_timeout\", \"confidence\": 0.97, \"evidence_refs\": [{\"field\": \"error_code\", \"value\": \"EA_TIMEOUT\"}, {\"field\": \"http_status\", \"value\": 504}, {\"field\": \"retry_count\", \"value\": 3}], \"evidence\": \"error_code=EA_TIMEOUT 且 http_status=504，重试 3 次仍失败，指向 EA 侧超时\", \"suggested_action\": \"异步任务退避重试，超阈值转人工，对账兜底\"}"
+      }
+    }
+  },
+  "rag_answer": {
+    "active": "v1",
+    "versions": {
+      "v1": {
+        "file": "rag_answer.v1.md",
+        "created": "2026-11-13",
+        "note": "从 rag_assistant.SYSTEM_PROMPT_TMPL 外置，文本逐字保留",
+        "vars": ["role_intro", "id_field"]
+      }
+    }
+  },
+  "rag_rerank": {
+    "active": "v1",
+    "versions": {
+      "v1": {
+        "file": "rag_rerank.v1.md",
+        "created": "2026-11-13",
+        "note": "从 rag_assistant._llm_rerank 的 system prompt 外置",
+        "vars": []
+      }
+    }
+  }
+}

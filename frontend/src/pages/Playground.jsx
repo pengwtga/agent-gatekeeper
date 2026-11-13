@@ -159,6 +159,12 @@ export default function Playground() {
   )
 }
 
+function fmtVal(v) {
+  if (v === null) return 'null'
+  if (typeof v === 'object') return JSON.stringify(v)  // 嵌套字段原样展示，别让人猜
+  return String(v)
+}
+
 function Result({ data }) {
   const confidence = data.confidence ?? 0
   const cls = data.root_cause_class || 'unknown'
@@ -166,6 +172,9 @@ function Result({ data }) {
   // 前端不再兜底计算 —— 判定逻辑复制两份，改一处忘一处是必然事故。
   // 字段缺失时按「需要人工」处理（fail-safe），绝不在前端猜一个放行。
   const needsReview = data.needs_human_review !== false
+  // 引用明细的 ok / actual / reason 全部由后端核算（app/agents/evidence.check_refs），
+  // 前端只渲染、不再判断 —— 校验逻辑落两份，改一处忘一处是必然事故
+  const refs = Array.isArray(data.evidence_refs) ? data.evidence_refs : []
 
   return (
     <>
@@ -188,7 +197,34 @@ function Result({ data }) {
         <span className="rpct">{Math.round(confidence * 100)}%</span>
       </div>
 
-      <div className="sec">判断依据</div>
+      <div className="sec">
+        判断依据
+        {refs.length > 0 && (
+          <span className="refsum">
+            结构化引用 {refs.filter((r) => r.ok).length}/{refs.length} 条已与输入核对
+          </span>
+        )}
+      </div>
+      {/* T3-5：引用条不只是展示，它把「凭什么这么判」拆成可逐条复核的字段事实 ——
+          哪条对不上、输入里的真值是什么，一眼可见，不用人去翻原始 JSON */}
+      {refs.length > 0 && (
+        <div className="refs">
+          {refs.map((r, i) => (
+            <div key={`${r.field}-${i}`} className={`ref ${r.ok ? 'rok' : 'rbad'}`}>
+              <code className="f">{r.field}</code>
+              <span className="eq">=</span>
+              <code className="v">{fmtVal(r.value)}</code>
+              <span className="mk">{r.ok ? 'OK' : 'X'}</span>
+              {!r.ok && (
+                <span className="why">
+                  {r.reason}
+                  {r.actual !== undefined && ` · 输入实际值 ${fmtVal(r.actual)}`}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="advice">{data.evidence || '（无）'}</div>
 
       <div className="sec">处置建议</div>

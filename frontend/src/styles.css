@@ -347,6 +347,70 @@ body {
   font-size: 12.5px;
   color: #8a929e;
 }
+
+/* 结构化引用条（T3-5）：一条判断依据 = 若干「字段 = 值」的核对结果 */
+.refsum {
+  margin-left: 8px;
+  font-weight: 400;
+  color: #adb5bd;
+}
+.refs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.ref {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-family: Menlo, monospace;
+}
+.ref code {
+  font-family: inherit;
+  background: none;
+  padding: 0;
+}
+.ref .f {
+  color: #495057;
+}
+.ref .eq {
+  color: #adb5bd;
+}
+.ref .v {
+  color: #1c7ed6;
+  font-weight: 600;
+}
+.ref .mk {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.ref.rok {
+  background: #f4fbf6;
+  border-color: #c3e8cf;
+}
+.ref.rok .mk {
+  color: #2b8a3e;
+  background: #e6f7ea;
+}
+.ref.rbad {
+  background: #fff5f5;
+  border-color: #f5c2c2;
+}
+.ref.rbad .mk {
+  color: #c92a2a;
+  background: #ffe3e3;
+}
+.ref .why {
+  color: #c92a2a;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+}
 .typing {
   color: #8a929e;
   font-size: 13px;
