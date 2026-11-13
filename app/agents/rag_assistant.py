@@ -7,11 +7,15 @@
 
 流程（以 SSRM 值班助手为例）：
 1. 知识库预热：历史工单 → 智谱 embedding-2 向量化 → 内存向量库（JSONL 持久化）
-2. 提问：问题向量化 → 余弦相似度 Top-K 检索 → 相似 case 作为上下文 → LLM 总结处置建议
+2. 提问：问题向量化 → 余弦 Top-K 与字符 bigram Top-K 做 RRF 混合排序（T4-4）→
+   相似 case 作为上下文 → LLM 总结处置建议；embedding 不可用时走关键词 + LLM 重排
 3. 双级降级：embedding 不可用 → 关键词检索 + LLM 重排兜底；LLM 不可用 → 直接返回原始 case
 4. 采信阈值：分数 < 阈值（spec.threshold）的检索结果标记"低置信"，提示人工判断
+   （T4-6：分数始终为可解释口径——vector 模式是余弦相似度，keyword 模式是字符
+   bigram 覆盖率，每条命中带 match_type 标注来源；重排不再伪造排名分）
 """
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -57,14 +61,21 @@ class RagAssistant:
         tickets = [json.loads(line) for line in self.spec.kb_file.open(encoding="utf-8") if line.strip()]
         self.docs = tickets
 
-        # 向量缓存按知识库文件名隔离，避免多领域互相覆盖
+        # 向量缓存按知识库文件名隔离，避免多领域互相覆盖；
+        # 有效性凭据是知识库**内容** hash（T4-5）——旧实现只比条数，
+        # KB 内容改了条数没变时会带着脏缓存上线
+        kb_hash = hashlib.sha256(self.spec.kb_file.read_bytes()).hexdigest()[:16]
         cache_file = _DATA_DIR / f"kb_vectors_{self.spec.kb_file.stem}.json"
         cache = InMemoryVectorStore()
-        if cache.load(cache_file) and len(cache) == len(tickets):
+        if cache.load(cache_file) and cache.meta.get("kb_hash") == kb_hash:
             self.store = cache
             self._ready = True
             logger.info("知识库从缓存加载", extra={"event": "rag_cache_hit", "stage": "rag", "count": len(tickets), "outcome": "ok"})
             return
+        if cache_file.exists():
+            logger.info("向量缓存失效（知识库内容变更），重建索引",
+                        extra={"event": "rag_cache_stale", "stage": "rag",
+                               "cached_hash": cache.meta.get("kb_hash"), "kb_hash": kb_hash, "outcome": "rebuild"})
 
         provider = self._pick_provider()
         if provider is None:
@@ -82,7 +93,7 @@ class RagAssistant:
             self.degrade_to_keyword(str(e))
             return
         self.store.add(tickets, vectors)
-        self.store.save(cache_file)
+        self.store.save(cache_file, meta={"kb_hash": kb_hash, "count": len(tickets)})
         self._ready = True
         logger.info("知识库预热完成", extra={"event": "rag_warmed", "stage": "rag", "count": len(tickets), "outcome": "ok"})
 
@@ -124,10 +135,20 @@ class RagAssistant:
     async def _retrieve(self, question: str, top_k: int, budget: Optional[Budget] = None) -> list[dict[str, Any]]:
         if len(self.store) > 0 and self._embed_client:
             try:
-                with span("rag.embed", mode="vector") as s:
+                with span("rag.embed", mode="hybrid") as s:
                     qvec = (await self._embed_client.embed([question]))[0]
                     s["attrs"]["dim"] = len(qvec)
-                return self.store.search(qvec, top_k=top_k)
+                hits = self.store.search(qvec, top_k=top_k)           # score = 余弦相似度
+                kw_hits = self._keyword_search(question, top_k=top_k)  # score = 字符覆盖率
+                # T4-4 混合检索：RRF（k=60）融合两路排名。向量通道对同义改写强、
+                # 对专名/错误码弱；字符通道相反——两路信号互补，融合排序比单路稳。
+                fused = self._rrf_fuse([hits, kw_hits], top_k=top_k)
+                kw_score_by_id = {h[self.spec.id_field]: h["score"] for h in kw_hits}
+                for d in fused:
+                    d["match_type"] = "hybrid"
+                    d["keyword_score"] = kw_score_by_id.get(d[self.spec.id_field], 0.0)
+                s["attrs"]["fused"] = len(fused)
+                return fused
             except Exception as e:
                 logger.warning("向量检索失败，降级关键词检索",
                                extra={"event": "rag_retrieve_degraded", "stage": "rag", "reason": str(e)[:160], "outcome": "degraded"})
@@ -137,11 +158,37 @@ class RagAssistant:
             s["attrs"]["candidates"] = len(candidates)
         return await self._llm_rerank(question, candidates, top_k, budget)
 
+    def _rrf_fuse(self, rankings: list[list[dict[str, Any]]], top_k: int, k: int = 60) -> list[dict[str, Any]]:
+        """Reciprocal Rank Fusion：score(d) = Σ 1/(k + rank_i(d))，k 取论文经验值 60。
+
+        只融合排名不融合原始分——余弦分与字符覆盖率量纲不同，直接加权是伪精度；
+        RRF 只消费排名，天然回避量纲问题。返回条目保留各自通道打来的原始字段
+        （以 vector 副本为基底），rrf 分仅用于排序。
+        """
+        id_f = self.spec.id_field
+        fused: dict[Any, dict[str, Any]] = {}
+        for ranking in rankings:
+            for rank, doc in enumerate(ranking, 1):
+                key = doc.get(id_f) or id(doc)
+                entry = fused.setdefault(key, {"doc": doc, "rrf": 0.0, "best_rank": len(ranking) + 1})
+                entry["rrf"] += 1.0 / (k + rank)
+                entry["best_rank"] = min(entry["best_rank"], rank)
+        ordered = sorted(fused.values(), key=lambda e: (-e["rrf"], e["best_rank"]))
+        return [dict(e["doc"], rrf=round(e["rrf"], 5)) for e in ordered[:top_k]]
+
     async def _llm_rerank(
         self, question: str, candidates: list[dict[str, Any]], top_k: int,
         budget: Optional[Budget] = None,
     ) -> list[dict[str, Any]]:
-        """小规模知识库的取舍：关键词宽召回 + LLM 重排序，替代 embedding 向量检索"""
+        """小规模知识库的取舍：关键词宽召回 + LLM 重排序，替代 embedding 向量检索
+
+        分数语义（T4-6 修复）：重排只改变顺序，**不改写分数**——每个候选保留
+        `_keyword_search` 的真实字符重叠率（bigram 覆盖率）。此前的
+        `score = 1.0 - rank*0.1` 让第一名恒为 1.0、永远不触发采信阈值，
+        等于 keyword+rerank 模式下门禁形同虚设；真实分数下阈值判断恢复意义
+        （与 T5-01 按 keyword 分数分布定标的 0.4/0.3/0.2 同一口径）。
+        分数与排名不再单调是诚实代价：LLM 认为相关的候选可能字符分不高。
+        """
         if not self.llm.is_configured or len(candidates) <= top_k:
             return candidates[:top_k]
         try:
@@ -159,15 +206,24 @@ class RagAssistant:
                 s["attrs"]["ordered"] = len(order)
             if not order:
                 return candidates[:top_k]
-            picked = [candidates[i] for i in order[:top_k]]
-            # 相似度分数用排名近似（1.0 递减），供采信阈值判断
-            for rank, c in enumerate(picked):
-                c["score"] = round(1.0 - rank * 0.1, 2)
-            return picked
+            # 只重排，不改分数：score 保留真实字符重叠率（T4-6）
+            return [candidates[i] for i in order[:top_k]]
         except Exception as e:
             logger.warning("LLM 重排失败，使用关键词序",
                            extra={"event": "rag_rerank_failed", "stage": "rag", "reason": str(e)[:160], "outcome": "degraded"})
             return candidates[:top_k]
+
+    @staticmethod
+    def _admitted(h: dict[str, Any], threshold: float) -> bool:
+        """采信门禁（T4-4）：任一可信信号过阈值即采纳。
+
+        keyword 模式：score 即字符覆盖率，与定标口径一致；
+        hybrid 模式：score 是余弦、keyword_score 是字符覆盖率——后者已被
+        三域扫描定标（0.4/0.3/0.2），作为第二采信信号参与判断，防止
+        RRF 把「向量弱、关键词强」的命中排到前面后反被余弦阈值误杀。
+        已知简化：两信号共用同一个数值阈值，按通道分开定标是后续项。
+        """
+        return (h.get("score") or 0) >= threshold or (h.get("keyword_score") or 0) >= threshold
 
     def _grams(self, text: str) -> frozenset[str]:
         """字符 bigram 集合。比 unigram 强在「近重复区分」：
@@ -185,7 +241,7 @@ class RagAssistant:
         scored = []
         for t, dg in zip(self.docs, self._doc_grams):
             score = len(qg & dg) / max(len(qg), 1)
-            scored.append({**t, "score": round(score, 4)})
+            scored.append({**t, "score": round(score, 4), "match_type": "keyword"})
         scored.sort(key=lambda d: d["score"], reverse=True)
         return scored[:top_k]
 
@@ -197,7 +253,7 @@ class RagAssistant:
 
         with span("rag.retrieve", top_k=settings.rag_top_k, mode=self.mode) as s:
             hits = await self._retrieve(question, top_k=settings.rag_top_k, budget=budget)
-            hits = [h for h in hits if h.get("score", 0) >= spec.threshold]
+            hits = [h for h in hits if self._admitted(h, spec.threshold)]
             s["attrs"]["hits"] = len(hits)
 
         if not hits:

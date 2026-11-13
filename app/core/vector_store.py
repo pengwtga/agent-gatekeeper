@@ -18,6 +18,7 @@ class InMemoryVectorStore:
     def __init__(self):
         self._docs: list[dict[str, Any]] = []
         self._matrix: Optional[np.ndarray] = None
+        self.meta: dict[str, Any] = {}
 
     def __len__(self) -> int:
         return len(self._docs)
@@ -44,15 +45,17 @@ class InMemoryVectorStore:
             for i in top_idx
         ]
 
-    def save(self, path: Path):
+    def save(self, path: Path, meta: Optional[dict[str, Any]] = None):
+        """持久化向量与文档；meta 携带缓存有效性凭据（如知识库内容 hash，T4-5）"""
         with path.open("w", encoding="utf-8") as f:
-            json.dump({"docs": self._docs, "vectors": self._matrix.tolist()}, f)
+            json.dump({"meta": meta or {}, "docs": self._docs, "vectors": self._matrix.tolist()}, f)
 
     def load(self, path: Path) -> bool:
         if not path.exists():
             return False
         with path.open(encoding="utf-8") as f:
             data = json.load(f)
+        self.meta = data.get("meta", {})
         self._docs = data["docs"]
         self._matrix = np.array(data["vectors"], dtype=np.float32)
         return True

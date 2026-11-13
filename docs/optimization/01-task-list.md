@@ -578,6 +578,15 @@ eval:
 
 ## T4 · 检索升级（2.5 天）
 
+> **T4 已收口（2026-11-13）**，各项结论：
+> - **T4-1 结论「不做」**：KB 已扩为 150/100/120 条带簇结构，切块前提不成立；
+>   实验证明 resolution/root_cause 入索引全线变差（credit 簇级 R@1 87.5% → 52.5%），详见 [T4-01](T4-01-chunking-experiment.md)
+> - **T4-2 / T4-3 被 T3-0 超越**：三域 230 条查询 + Recall@1/@3 / MRR@8 + strict/cluster 双口径 + 阈值扫描已落地
+> - **T4-4 已完成**：向量+字符双路 RRF（k=60）混合排序，采信门禁改「任一信号过阈值」；
+>   顺带修复 rag_eval 的 PYTHONHASHSEED 漂移（relevant 跨簇查询取簇并集），详见 [T4-04](T4-04-rrf-hybrid-retrieval.md)
+> - **T4-5 已完成**：向量缓存按 KB 内容 sha256 失效（旧实现只比条数），详见 [T4-05](T4-05-cache-hash-invalidation.md)
+> - **T4-6 已完成**：重排不再伪造排名分，keyword+rerank 门禁恢复有效，详见 [T4-06](T4-06-honest-rerank-score.md)
+
 ### T4-1 切块：30 条 → 90 chunk（2 小时）
 
 现在一条工单一个向量（`title + symptom`），`resolution` 没参与检索但参与了生成。

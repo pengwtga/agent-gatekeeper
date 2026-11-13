@@ -16,9 +16,10 @@
     python -m app.evaluation.rag_eval --sweep                # 采信阈值扫描（仅 ssrm 常规集）
 
 已知边界（写在明处）：
-    - LLM 重排模式的 score 是排名近似（1.0 递减 0.1），不是语义相似度，
-      阈值扫描对它没有意义 —— 这本身就是一个设计结论：
-      采信阈值这道门禁只在"分数可解释"的通道上生效。
+    - T4-6 之后重排模式不再伪造排名分：score 保留真实字符重叠率，
+      与关键词召回同口径，阈值扫描对两条通道都有意义；
+    - vector 通道的分数是余弦相似度，与 keyword 分数不可直接比较，
+      采信阈值按模式各自定标（当前离线定标基于 keyword 分数分布）。
 """
 
 import asyncio
@@ -82,8 +83,14 @@ async def evaluate(queries: list[dict], rag: RagAssistant, use_rerank: bool,
     results = []
     for q in queries:
         relevant = set(q["relevant"])
-        q_cluster = next(iter({cluster.get(t, t) for t in relevant}))
-        cluster_relevant = cluster_members.get(q_cluster, {q_cluster})
+        # 相关簇 = 所有相关条目所属簇的并集（T4-4 顺带修复）：
+        # 个别困难查询（HRQ-000/002 批量回调丢失形态）的相关条目跨两个簇，
+        # 旧写法 next(iter({...})) 在 set 上随机取一个簇 → 评测结果随
+        # PYTHONHASHSEED 漂移；并集语义才是「命中任一相关现象即算对」。
+        cluster_relevant: set[str] = set()
+        for t in relevant:
+            base = cluster.get(t, t)
+            cluster_relevant |= cluster_members.get(base, {base})
         if use_rerank:
             # 宽召回 12 条再 LLM 重排回评估窗口 8 条；
             # 直接取 8 的话 `_llm_rerank` 会因 candidates<=top_k 跳过重排
