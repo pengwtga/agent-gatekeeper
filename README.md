@@ -51,7 +51,7 @@
 5. **请求级时间预算**：总预算按 Provider 切时间片，预算耗尽即降级；与 per-try 超时、nginx 网关超时三层对齐，避免上游先掐断
 6. **全链路可观测**：每个请求发 trace_id，进程内 span 埋点（classify / rag.retrieve / rag.rerank / llm.try）画成瀑布图；分钟级指标（请求量/延迟分位/错误率/降级率/按 Provider token 归因）+ 最近 100 条链路，React 面板三页展示（概览/请求流水/质量分析）
 7. **评测内建**：根因分类有 `/eval` 端点 + 命令行脚本（常规集 100 条 + 困难集 25 条，准确率/延迟/混淆样例/规则基线对照）；RAG 检索有独立评测（Recall@1/@3、MRR@8、采信阈值扫描），检索通道选择和阈值均有数字依据
-8. **引擎与领域知识分离（Domain Pack）**：分类引擎只管机制（通道/门禁/校验），5 类定义、few-shot、规则基线都是可插拔的领域包（`app/domains/ssrm`、`app/domains/csa`）——已用第二个领域实测：同一引擎零代码改动，客服工单分类 LLM 通道 96.7%
+8. **引擎与领域知识分离（Domain Pack）**：分类引擎只管机制（通道/门禁/校验），类别定义、few-shot、规则基线都是可插拔的领域包（`app/domains/ssrm`、`csa`、`credit`）——第二领域（客服）LLM 通道 96.7%；第三领域（信贷进件风险分类）反向验证了通道编排的重要性：小模型跑硬阈值领域仅 60~67%，引擎因此支持 **rule_first 规则先行**——规则直判（300 条明确区 100%）、灰区（dti 0.6~0.7 边界带）才升级 LLM 仲裁，仲裁结论仍过证据/置信度双门禁（实测判错的仲裁被证据门禁拦下转人工）；助手侧同样 Pack 化（AssistantSpec）：同一 RAG 引擎挂三份领域知识库，**三域均为完整「分类 + 助手」双 Agent 结构**（运维值班助手 / 电商坐席助手 / 信贷催员辅助，后者即 JD 语境的「催员辅助 Agent」）
 9. **通用工具调用层**：tool registry + LLM JSON mode 选工具 + 白名单/schema/置信度三道关（不用 Function Call/LangChain 的理由见 T5-00 文档）；内置 3 个只读工具，端点 `GET /tools`、`POST /tools/ask`
 10. **公网防护**：`/classify` `/assist` `/tools/ask` 单 IP 滑动窗口限速（20 次/分钟）；`/eval` 因单次请求会循环调用 LLM，要求 token 校验（`.env` 配置 `SSRM_AIOPS_EVAL_TOKEN`）
 
@@ -88,7 +88,7 @@
 - **向量检索优先**：embedding-2 向量化 + 余弦相似度 Top-3（JSONL 持久化缓存，二次启动免重复调用）
 - **降级链路**：embedding 不可用（免费档余额限制）→ 关键词宽召回(8) + LLM 重排序取 Top-3；LLM 不可用 → 直接返回原始 case；启动预热失败不阻塞服务（`asyncio.wait_for` 包住，超时直接进降级模式）
 - **采信阈值**：相似度 < 0.55 提示人工判断，不硬答——0.55 不是拍的，是阈值扫描出来的：0.5 起留存结果精度掉到 96%，0.55 起回到 100%（代价是 27% 查询转"建议人工"，这正是采信门禁的意图）
-- **检索评测**（`python -m app.evaluation.rag_eval`）：常规集 30 条（对 symptom 改写）+ 困难集 10 条（同义词替换去黑话）。实测：常规集两通道均 Recall@1 100%；困难集关键词召回 Recall@1 90%，加 LLM 重排回到 100%——"为什么要 LLM 重排"是测量驱动的决策
+- **检索评测**（`python -m app.evaluation.rag_eval [--domain csa|credit]`）：三域检索评测集共 230 条查询，**strict / cluster 双口径**（同现象簇即命中 vs 精确命中）。实测（关键词召回，bigram 打分）：ssrm 常规 strict 97.3% / 簇级 99.3%，csa 100%，credit 85%（R@3 95%）。扩容曾暴露 unigram 打分簇内区分崩塌（26%），换 bigram + 查询派生改进后恢复——完整调优链路见 T5-01。三域采信阈值各自扫描定标（0.4 / 0.3 / 0.2）
 - **检索规模 benchmark**（`python -m scripts.vector_bench`，`--pipeline` 测真实工单扩充）：余弦内核 1 万条 p50 0.91ms（对比 LLM 调用 p95 ≈ 4200ms 占比 <0.2%）；实测先到的瓶颈是纯 Python 关键词召回（1 万条 28ms）而非余弦——十万条级才需换结构，且第一刀优化是关键词扫描不是向量库
 - **可视化页面**：`/assistant` 聊天式问答、预设问题、置信度分级着色、相似工单表格、模式/通道徽标
 
@@ -124,14 +124,33 @@ python -m app.evaluation.rag_eval                  # RAG 检索评测
 
 ## 数据集
 
+数据按领域分目录：`data/ssrm/`（运维值班）、`data/csa/`（电商客服）、`data/credit/`（信贷风控），与 `app/domains/` 领域包一一对应。
+
+**SSRM（运维值班）**
+
 | 文件 | 内容 | 用途 |
 |---|---|---|
-| `data/incidents.jsonl` | 100 条合成事件（5 类 × 20），字段模拟真实工单上下文 | 分类常规评测（回归防线） |
-| `data/incidents_hard.jsonl` | 25 条困难事件：改写表述、无 error_code、口语化描述 | 检验 LLM 相对规则基线的泛化差距 |
-| `data/kb_tickets.jsonl` | 30 条历史 oncall 工单（现象/根因/处置） | RAG 知识库 |
-| `data/rag_queries.jsonl` | 30 条值班口吻提问 → 应命中工单（对 symptom 改写） | RAG 检索常规评测 |
-| `data/rag_queries_hard.jsonl` | 10 条同义词替换/去黑话提问 | 打关键词召回的语义鸿沟 |
-| `data/csa_tickets.jsonl` | 30 条电商客服工单（5 类 × 6，口语化） | 第二领域（CSA）分类评测，验证引擎可迁移 |
+| `data/ssrm/incidents.jsonl` | 100 条合成事件（5 类 × 20），字段模拟真实工单上下文 | 分类常规评测（回归防线） |
+| `data/ssrm/incidents_hard.jsonl` | 25 条困难事件：改写表述、无 error_code、口语化描述 | 检验 LLM 相对规则基线的泛化差距 |
+| `data/ssrm/kb_tickets.jsonl` | 150 条历史 oncall 工单（30 手工 + 120 变体；现象/根因/处置） | SSRM 值班助手知识库；生成器 `scripts/gen_assistant_data.py` 固定种子 |
+| `data/ssrm/rag_queries.jsonl` | 150 条值班口吻提问（对 symptom 改写） | SSRM 检索评测（查询 → 应命中条目/簇） |
+| `data/ssrm/rag_queries_hard.jsonl` | 40 条同义词替换/去黑话提问 | 打关键词召回的语义鸿沟 |
+
+**CSA（电商客服）**
+
+| 文件 | 内容 | 用途 |
+|---|---|---|
+| `data/csa/csa_tickets.jsonl` | 150 条电商客服工单（30 手工 + 120 合成） | 分类评测，规则 100%；生成器 `scripts/gen_csa_dataset.py` |
+| `data/csa/csa_agent_kb.jsonl` | 100 条坐席助手 SOP/话术 | CSA 助手知识库（话术红线内置） |
+| `data/csa/csa_kb_queries.jsonl` | 40 条坐席助手检索评测 | 检索评测 |
+
+**CREDIT（信贷风控）**
+
+| 文件 | 内容 | 用途 |
+|---|---|---|
+| `data/credit/credit_applications.jsonl` | 300 条信贷进件（30 手工金样本 + 270 参数化合成，5 类 × 60，含 9 条灰区带） | 分类评测：规则先行 + 灰区 LLM 仲裁；生成器 `scripts/gen_credit_dataset.py` 固定种子可复现 |
+| `data/credit/credit_collection_kb.jsonl` | 120 条催员辅助话术（5 类 × 24，含合规红线） | CREDIT 助手知识库：早期提醒/承诺跟进/困难协商/失联找回/合规红线 |
+| `data/credit/credit_kb_queries.jsonl` | 40 条催员辅助检索评测 | 检索评测 |
 
 生成脚本：`scripts/gen_dataset.py` / `gen_hard_dataset.py` / `gen_kb.py`（固定随机种子，可复现）。
 
@@ -145,8 +164,12 @@ python -m app.evaluation.eval 30 --hard  # 分类困难集
 python -m app.evaluation.eval 30 --rule  # 规则基线对照
 python -m app.evaluation.eval 30 --domain csa       # 电商客服领域（同引擎换包）
 python -m app.evaluation.eval 30 --domain csa --rule
+python -m app.evaluation.eval 30 --domain credit    # 信贷进件风险分类（规则先行+灰区仲裁）
+python -m app.evaluation.eval 30 --domain credit --rule
 
-python -m app.evaluation.rag_eval        # RAG 检索评测（离线，秒出）
+python -m app.evaluation.rag_eval        # SSRM 检索评测（离线，秒出）
+python -m app.evaluation.rag_eval --domain csa    # 坐席助手域
+python -m app.evaluation.rag_eval --domain credit # 催员辅助域
 python -m app.evaluation.rag_eval --rerank   # 对齐线上降级模式（调 LLM）
 python -m app.evaluation.rag_eval --sweep    # 采信阈值扫描表
 ```
@@ -174,9 +197,10 @@ agent-gatekeeper/
 │   │   ├── obs.py           # FastAPI 中间件（trace_id + 访问记录）+ 日志初始化
 │   │   ├── metrics.py       # 指标聚合（分位数/分钟时序/请求流水/分类分布）
 │   │   └── tracing.py       # 进程内 span 采集（埋点 → 瀑布图）
-│   ├── domains/         # 领域包（分类引擎的知识插件）
+│   ├── domains/         # 领域包（分类引擎 + 助手的知识插件）
 │   │   ├── ssrm/            # 供应商运维领域：taxonomy / rules / pack
-│   │   └── csa/             # 电商客服领域（第二实例，证明可迁移）
+│   │   ├── csa/             # 电商客服领域（第二实例，证明可迁移）
+│   │   └── credit/          # 信贷域：进件风险分类（rule_first）+ 催员辅助知识库
 │   └── evaluation/      # 评测
 │       ├── dataset.py       # 数据集加载
 │       ├── eval.py          # 分类评测（python -m app.evaluation.eval，支持 --domain）
@@ -191,7 +215,7 @@ agent-gatekeeper/
 │   └── nginx.conf     # /api 反代 + SPA 路由回退 + gzip
 ├── Dockerfile         # 后端镜像（非 root、HEALTHCHECK、分层缓存）
 ├── docker-compose.yml # api + web 一键起
-├── data/              # 评测集与知识库（见「数据集」一节）
+├── data/              # 评测集与知识库，按领域分目录（ssrm/ csa/ credit/，见「数据集」一节）
 ├── docs/               # 架构图 + 页面截图 + 改造文档（optimization/）+ 设计决策（design-decisions.md）
 ├── scripts/            # 数据集生成脚本（固定种子可复现）
 ├── .env.example

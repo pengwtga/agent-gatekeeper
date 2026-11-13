@@ -8,7 +8,7 @@ __pycache__/
 
 # 运行产物
 *.log
-data/kb_vectors.json
+data/kb_vectors*.json
 
 # 前端
 frontend/node_modules/

@@ -27,6 +27,8 @@ from app.core.budget import Budget
 from app.core.builtin_tools import build_default_registry
 from app.core.tools import choose_and_run
 from app.agents.classifier import RootCauseClassifier
+from app.domains.credit import pack as credit_pack
+from app.domains.csa import pack as csa_pack
 from app.domains.ssrm import pack as ssrm_pack
 from app.config import settings
 from app.evaluation.dataset import load_dataset, stats
@@ -41,7 +43,14 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 classifier = RootCauseClassifier(llm_client, ssrm_pack)
-rag = RagAssistant(llm_client)
+
+# 多领域助手注册表：每个声明了 assistant 规格的 pack 一个 RagAssistant 实例。
+# 引擎是同一个（检索+阈值+grounding），知识库/阈值/人设由 pack 注入 ——「机制与知识分离」
+assistants: dict[str, RagAssistant] = {
+    _p.name: RagAssistant(llm_client, _p.assistant)
+    for _p in (ssrm_pack, csa_pack, credit_pack) if _p.assistant is not None
+}
+rag = assistants["ssrm"]  # SSRM 值班助手：工具注册表等旧引用的默认实例
 registry = build_default_registry(rag)
 
 
@@ -56,17 +65,20 @@ async def lifespan(app: FastAPI):
             "outcome": "ok",
         },
     )
-    try:
-        # 建索引是「尽快变好」，不是「不建好就不能服务」：
-        # 卡住启动比退回关键词检索严重得多（K8s 探针会直接把 Pod 判死）
-        await asyncio.wait_for(rag.warmup(), timeout=settings.warmup_timeout_seconds)
-    except asyncio.TimeoutError:
-        rag.degrade_to_keyword(f"warmup_timeout>{settings.warmup_timeout_seconds}s")
-    logger.info("RAG 值班助手就绪", extra={"event": "rag_ready", "stage": "boot", "reason": rag.mode, "outcome": "ok"})
+    # 建索引是「尽快变好」，不是「不建好就不能服务」：
+    # 卡住启动比退回关键词检索严重得多（K8s 探针会直接把 Pod 判死）
+    for name, assistant in assistants.items():
+        try:
+            await asyncio.wait_for(assistant.warmup(), timeout=settings.warmup_timeout_seconds)
+        except asyncio.TimeoutError:
+            assistant.degrade_to_keyword(f"warmup_timeout>{settings.warmup_timeout_seconds}s")
+        logger.info("助手就绪", extra={"event": "rag_ready", "stage": "boot",
+                                      "domain": name, "reason": assistant.mode, "outcome": "ok"})
     yield
     # 优雅退出：先关连接池再让进程退出，避免悬挂连接拖慢 shutdown
     await llm_client.aclose()
-    await rag.aclose()
+    for assistant in assistants.values():
+        await assistant.aclose()
     logger.info("连接池已关闭，进程退出", extra={"event": "app_stop", "stage": "shutdown", "outcome": "ok"})
 
 
@@ -180,6 +192,7 @@ async def health():
         "llm_providers": llm_client.configured_providers,
         "llm_usage": llm_client.usage,   # 进程累计 token 用量，成本可见的最小实现
         "classes": list(ssrm_pack.classes.keys()),
+        "assistants": {name: a.mode for name, a in assistants.items()},
     }
 
 
@@ -260,15 +273,23 @@ async def dataset_stats():
 
 class AssistRequest(BaseModel):
     question: str
+    # 助手领域：ssrm=值班助手（默认，向后兼容）/ csa=坐席助手 / credit=催员辅助
+    domain: str = "ssrm"
 
 
 @app.post("/assist")
 async def assist(req: AssistRequest, request: Request):
-    """值班助手：描述你遇到的问题，返回相似历史工单和处置建议"""
+    """领域助手：描述你遇到的问题，返回相似历史案例和建议。
+
+    同一个引擎、三份领域知识：ssrm=运维值班 / csa=电商坐席 / credit=信贷催员辅助。
+    """
+    assistant = assistants.get(req.domain)
+    if assistant is None:
+        raise HTTPException(status_code=404, detail=f"领域 {req.domain!r} 没有助手场景")
     _check_rate(request)
     budget = Budget(settings.request_budget_ms)
-    with span("assist", budget_ms=settings.request_budget_ms) as s:
-        result = await rag.assist(req.question, budget)
+    with span("assist", budget_ms=settings.request_budget_ms, domain=req.domain) as s:
+        result = await assistant.assist(req.question, budget)
         s["attrs"]["mode"] = result.get("mode")
         s["attrs"]["degraded"] = "error" in result
     return attach_obs(result)

@@ -1,10 +1,15 @@
-"""RAG 值班助手 — 历史工单检索 + LLM 处置建议
+"""RAG 助手引擎 — 领域无关：历史案例检索 + LLM 处置建议
 
-流程（面试重点）：
-1. 知识库预热：30 条历史 oncall 工单 → 智谱 embedding-2 向量化 → 内存向量库（JSONL 持久化）
-2. 值班提问：问题向量化 → 余弦相似度 Top-3 检索 → 相似 case 作为上下文 → LLM 总结处置建议
-3. 双级降级：embedding 不可用 → 关键词检索兜底；LLM 不可用 → 直接返回检索到的原始 case
-4. 采信阈值：相似度 < 0.55 的检索结果标记"低置信"，提示值班人工判断
+机制与知识分离（面试重点）：
+引擎只负责机制——宽召回 + LLM 重排 / 向量检索、采信阈值门禁、grounding 总结、
+双级降级；「知识库里放什么、阈值多少、助手的人设边界」由领域的 AssistantSpec 声明
+（ssrm=值班助手 / csa=坐席助手 / credit=催员辅助），同一引擎服务三个领域。
+
+流程（以 SSRM 值班助手为例）：
+1. 知识库预热：历史工单 → 智谱 embedding-2 向量化 → 内存向量库（JSONL 持久化）
+2. 提问：问题向量化 → 余弦相似度 Top-K 检索 → 相似 case 作为上下文 → LLM 总结处置建议
+3. 双级降级：embedding 不可用 → 关键词检索 + LLM 重排兜底；LLM 不可用 → 直接返回原始 case
+4. 采信阈值：分数 < 阈值（spec.threshold）的检索结果标记"低置信"，提示人工判断
 """
 
 import json
@@ -16,38 +21,49 @@ from app.core.budget import Budget
 from app.config import settings
 from app.core.embeddings import EmbeddingClient
 from app.core.llm_client import LLMClient
+from app.domains import AssistantSpec
 from app.observability.tracing import span
 from app.core.vector_store import InMemoryVectorStore
 
 logger = logging.getLogger(__name__)
 
-KB_FILE = Path(__file__).parent.parent.parent / "data" / "kb_tickets.jsonl"  # app/agents/ → 项目根
-CACHE_FILE = Path(__file__).parent.parent.parent / "data" / "kb_vectors.json"
+_DATA_DIR = Path(__file__).parent.parent.parent / "data"  # app/agents/ → 项目根
 
-SYSTEM_PROMPT = """你是 SSRM（供应商管理系统）的值班助手。值班同事遇到卡单/同步失败问题时会来问你。
-你会收到：①值班同事的提问；②知识库中检索到的相似历史工单（含现象、根因、处置过程）。
-任务：基于历史工单给出处置建议。规则：
-1. 优先参考历史工单的实际处置方式，不要凭空编造系统里不存在的操作
-2. 如果历史 case 与当前问题不完全一致，明确指出差异
+# system prompt 模板：{intro} 由领域的 AssistantSpec.role_intro 注入，
+# 规则部分（不编造/指出差异/不硬答/JSON 输出）是机制层的，属于引擎不随领域变
+SYSTEM_PROMPT_TMPL = """你是{intro}。用户遇到问题时会来问你。
+你会收到：①用户的提问；②知识库中检索到的相似历史案例（含现象、类别、处置过程/话术）。
+任务：基于历史案例给出建议。规则：
+1. 优先参考历史案例的实际处置方式，不要凭空编造系统或流程里不存在的操作
+2. 如果历史案例与当前问题不完全一致，明确指出差异
 3. 如果检索结果都不相关，直接说不确定，建议升级人工——不要硬答
-4. 只输出 JSON：{"answer": "处置建议（150字内，分步骤）", "confidence": 0.0, "based_on": [引用的 ticket_id]}"""
+4. 只输出 JSON：{{"answer": "建议（150字内，分步骤）", "confidence": 0.0, "based_on": [引用的 {id_field}]}}"""
+
+
+def _default_spec() -> AssistantSpec:
+    """SSRM 值班助手：默认领域（保持旧行为向后兼容）"""
+    return AssistantSpec(kb_file=_DATA_DIR / "ssrm" / "kb_tickets.jsonl", threshold=0.55)
 
 
 class RagAssistant:
-    def __init__(self, llm: LLMClient):
+    def __init__(self, llm: LLMClient, spec: Optional[AssistantSpec] = None):
         self.llm = llm
+        self.spec = spec or _default_spec()
         self.store = InMemoryVectorStore()
         self.docs: list[dict[str, Any]] = []
+        self._doc_grams: Optional[list[frozenset[str]]] = None
         self._ready = False
         self._embed_client: Optional[EmbeddingClient] = None
 
     # ── 知识库预热 ──
     async def warmup(self):
-        tickets = [json.loads(line) for line in KB_FILE.open(encoding="utf-8") if line.strip()]
+        tickets = [json.loads(line) for line in self.spec.kb_file.open(encoding="utf-8") if line.strip()]
         self.docs = tickets
 
+        # 向量缓存按知识库文件名隔离，避免多领域互相覆盖
+        cache_file = _DATA_DIR / f"kb_vectors_{self.spec.kb_file.stem}.json"
         cache = InMemoryVectorStore()
-        if cache.load(CACHE_FILE) and len(cache) == len(tickets):
+        if cache.load(cache_file) and len(cache) == len(tickets):
             self.store = cache
             self._ready = True
             logger.info("知识库从缓存加载", extra={"event": "rag_cache_hit", "stage": "rag", "count": len(tickets), "outcome": "ok"})
@@ -69,7 +85,7 @@ class RagAssistant:
             self.degrade_to_keyword(str(e))
             return
         self.store.add(tickets, vectors)
-        self.store.save(CACHE_FILE)
+        self.store.save(cache_file)
         self._ready = True
         logger.info("知识库预热完成", extra={"event": "rag_warmed", "stage": "rag", "count": len(tickets), "outcome": "ok"})
 
@@ -134,7 +150,7 @@ class RagAssistant:
         try:
             cands = [{"cand_id": i, "title": c["title"], "symptom": c["symptom"][:80]}
                      for i, c in enumerate(candidates)]
-            prompt = (f"值班提问：{question}\n\n候选历史工单：\n"
+            prompt = (f"用户提问：{question}\n\n候选历史案例：\n"
                       + json.dumps(cands, ensure_ascii=False)
                       + f'\n\n请选出与提问最相关的至多 {top_k} 条，按相关性降序。'
                         '只输出 JSON：{"order": [cand_id, ...]}')
@@ -156,48 +172,62 @@ class RagAssistant:
                            extra={"event": "rag_rerank_failed", "stage": "rag", "reason": str(e)[:160], "outcome": "degraded"})
             return candidates[:top_k]
 
+    def _grams(self, text: str) -> frozenset[str]:
+        """字符 bigram 集合。比 unigram 强在「近重复区分」：
+        KB 扩到 150 条后（同簇变体共享几乎全部单字），unigram 集合重叠率趋于相同，
+        无法区分「 XF-885 」和「 XF-883 」；bigram 保留序列信息（-88/885/883），
+        区分度实测恢复（见 rag_eval 150 条规模评测）。"""
+        t = "".join(text.split())
+        return frozenset(t[i:i + 2] for i in range(len(t) - 1))
+
     def _keyword_search(self, question: str, top_k: int) -> list[dict[str, Any]]:
-        q = question.lower()
+        # 文档 bigram 集合按知识库内容惰性缓存（docs 不变时只建一次）
+        if self._doc_grams is None or len(self._doc_grams) != len(self.docs):
+            self._doc_grams = [self._grams(f"{t['title']}{t['symptom']}") for t in self.docs]
+        qg = self._grams(question)
         scored = []
-        for t in self.docs:
-            text = f"{t['title']}{t['symptom']}".lower()
-            score = sum(1 for kw in set(q) if kw in text) / max(len(set(q)), 1)
+        for t, dg in zip(self.docs, self._doc_grams):
+            score = len(qg & dg) / max(len(qg), 1)
             scored.append({**t, "score": round(score, 4)})
         scored.sort(key=lambda d: d["score"], reverse=True)
         return scored[:top_k]
 
-    # ── 值班问答 ──
+    # ── 提问答复 ──
     async def assist(self, question: str, budget: Optional[Budget] = None) -> dict[str, Any]:
         if not self._ready:
             return {"error": "知识库未就绪"}
+        spec = self.spec
 
         with span("rag.retrieve", top_k=settings.rag_top_k, mode=self.mode) as s:
             hits = await self._retrieve(question, top_k=settings.rag_top_k, budget=budget)
-            hits = [h for h in hits if h.get("score", 0) >= settings.rag_min_score]
+            hits = [h for h in hits if h.get("score", 0) >= spec.threshold]
             s["attrs"]["hits"] = len(hits)
 
         if not hits:
             return {
-                "answer": "知识库中没有找到相似的历史工单，建议升级人工排查，并把根因沉淀进知识库。",
+                "answer": "知识库中没有找到相似的历史案例，建议升级人工处理，并把该 case 归因后沉淀进知识库。",
                 "confidence": 0.0,
                 "sources": [],
                 "mode": self.mode,
             }
+        id_f, class_f = spec.id_field, spec.class_field
         # LLM 总结（不可用则直接返回原始 case）
         if self.llm.is_configured:
             try:
                 context = json.dumps(
-                    [{"ticket_id": h["ticket_id"],
+                    [{id_f: h[id_f],
                       "现象": f"{h['title']}：{h['symptom']}",
-                      "根因类别": h["root_cause_class"],
+                      "类别": h[class_f],
                       "处置过程": h["resolution"]} for h in hits],
                     ensure_ascii=False)
+                system_prompt = SYSTEM_PROMPT_TMPL.format(
+                    intro=spec.role_intro or "智能助手", id_field=id_f)
                 with span("rag.answer", hits=len(hits)) as s:
                     result = await self.llm.chat_json(
-                        SYSTEM_PROMPT, f"值班提问：{question}\n\n相似历史工单：{context}", budget=budget)
+                        system_prompt, f"提问：{question}\n\n相似历史案例：{context}", budget=budget)
                     s["attrs"]["provider"] = result.get("_provider")
-                result["sources"] = [{"ticket_id": h["ticket_id"], "title": h["title"],
-                                      "root_cause_class": h["root_cause_class"],
+                result["sources"] = [{id_f: h[id_f], "title": h["title"],
+                                      class_f: h[class_f],
                                       "score": h["score"]} for h in hits]
                 result["mode"] = self.mode
                 result["llm_provider"] = result.pop("_provider", "unknown")
@@ -207,10 +237,10 @@ class RagAssistant:
                                extra={"event": "rag_answer_degraded", "stage": "rag", "reason": str(e)[:160], "outcome": "degraded"})
 
         return {
-            "answer": "LLM 暂不可用，以下是检索到的最相似历史工单，请人工参考：",
-            "cases": [{"ticket_id": h["ticket_id"], "title": h["title"], "symptom": h["symptom"],
+            "answer": "LLM 暂不可用，以下是检索到的最相似历史案例，请人工参考：",
+            "cases": [{id_f: h[id_f], "title": h["title"], "symptom": h["symptom"],
                        "resolution": h["resolution"]} for h in hits],
             "confidence": max(h["score"] for h in hits),
-            "sources": [{"ticket_id": h["ticket_id"], "score": h["score"]} for h in hits],
+            "sources": [{id_f: h[id_f], "score": h["score"]} for h in hits],
             "mode": self.mode,
         }

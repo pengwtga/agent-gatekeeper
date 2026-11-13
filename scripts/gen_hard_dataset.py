@@ -17,7 +17,7 @@
 import json
 from pathlib import Path
 
-OUT_FILE = Path(__file__).parent.parent / "data" / "incidents_hard.jsonl"
+OUT_FILE = Path(__file__).parent.parent / "data" / "ssrm" / "incidents_hard.jsonl"
 
 # (label, incident) —— 全部人工编写
 SAMPLES = [

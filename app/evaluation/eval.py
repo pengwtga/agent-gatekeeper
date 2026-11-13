@@ -18,6 +18,7 @@ from app.agents.classifier import RootCauseClassifier
 from app.core.llm_client import llm_client
 from app.domains import DomainPack
 from app.domains.csa import pack as csa_pack
+from app.domains.credit import pack as credit_pack
 from app.domains.ssrm import pack as ssrm_pack
 from app.evaluation.dataset import load_dataset
 
@@ -25,15 +26,16 @@ DATA_DIR = Path(__file__).parent.parent.parent / "data"  # app/evaluation/ → �
 
 # 领域注册表：评测入口按 --domain 选包。接新领域 = 这里加一行 + 写一个 pack
 _DOMAINS: dict[str, tuple[DomainPack, Path]] = {
-    "ssrm": (ssrm_pack, DATA_DIR / "incidents.jsonl"),
-    "csa": (csa_pack, DATA_DIR / "csa_tickets.jsonl"),
+    "ssrm": (ssrm_pack, DATA_DIR / "ssrm" / "incidents.jsonl"),
+    "csa": (csa_pack, DATA_DIR / "csa" / "csa_tickets.jsonl"),
+    "credit": (credit_pack, DATA_DIR / "credit" / "credit_applications.jsonl"),
 }
 
 
 async def main(limit: int, use_rule: bool, hard: bool, domain: str):
     pack, default_path = _DOMAINS[domain]
     # hard 集目前只有 ssrm 有；csa 的困难样本直接混在常规集里（口语化改写）
-    path = (DATA_DIR / "incidents_hard.jsonl" if hard else default_path) if domain == "ssrm" else default_path
+    path = (DATA_DIR / "ssrm" / "incidents_hard.jsonl" if hard else default_path) if domain == "ssrm" else default_path
     classifier = RootCauseClassifier(llm_client, pack)
 
     async def classify(row):
@@ -57,7 +59,8 @@ async def main(limit: int, use_rule: bool, hard: bool, domain: str):
         if pred == label:
             correct += 1
         else:
-            confusions.append((label, pred, row["incident"].get("incident_id") or row["incident"].get("ticket_id", "?")))
+            rid = row["incident"].get("incident_id") or row["incident"].get("ticket_id") or row["incident"].get("app_id", "?")
+            confusions.append((label, pred, rid))
         if pred == "unknown":
             unknowns += 1
 

@@ -8,9 +8,13 @@
 - 类别数同为 5，保证与 SSRM 的评测结果可直接对比（同引擎、同规模、不同知识）。
 """
 
-from app.domains import DomainPack
+from pathlib import Path
+
+from app.domains import AssistantSpec, DomainPack
 from app.domains.csa.rules import rule_baseline
 from app.domains.csa.taxonomy import FEW_SHOT, ROLE_INTRO, TICKET_CLASSES
+
+_DATA = Path(__file__).resolve().parents[3] / "data" / "csa"  # app/domains/csa/ → 项目根/data/csa
 
 pack = DomainPack(
     name="csa",
@@ -18,4 +22,12 @@ pack = DomainPack(
     classes=TICKET_CLASSES,
     few_shot=FEW_SHOT,
     rule_baseline=rule_baseline,
+    # 坐席助手：客服坐席接待时的标准话术（SOP）检索，字段用电商客服命名
+    assistant=AssistantSpec(
+        kb_file=_DATA / "csa_agent_kb.jsonl",
+        threshold=0.3,  # 100KB 扫描定标：0.3 覆盖 82%/精度 98%
+        id_field="case_id",
+        class_field="category",
+        role_intro="电商客服团队的坐席助手。客服坐席在接待用户咨询/投诉时会来问你",
+    ),
 )

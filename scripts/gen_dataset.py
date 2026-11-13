@@ -6,7 +6,7 @@ stage / source_system / error_code / error_message / wait_minutes / retry_count 
 用法：
     ~/.workbuddy/binaries/python/envs/aiops/bin/python scripts/gen_dataset.py
 输出：
-    data/incidents.jsonl（每行一个样本：{"incident": {...}, "label": "...", "expected_action": "..."})
+    data/ssrm/incidents.jsonl（每行一个样本：{"incident": {...}, "label": "...", "expected_action": "..."})
 """
 
 import json
@@ -15,7 +15,7 @@ from pathlib import Path
 
 random.seed(20261023)  # 固定种子保证可复现
 
-DATASET_DIR = Path(__file__).parent.parent / "data"
+DATASET_DIR = Path(__file__).parent.parent / "data" / "ssrm"
 OUT_FILE = DATASET_DIR / "incidents.jsonl"
 
 STAGES = ["register", "register", "register", "change", "change"]  # 注册为主

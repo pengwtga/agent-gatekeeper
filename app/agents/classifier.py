@@ -51,6 +51,51 @@ class RootCauseClassifier:
         """
         from app.observability.metrics import metrics
 
+        # 规则先行通道（pack.rule_first）：规则给出明确结论直接采用，
+        # 落 unknown（灰区）才升级 LLM 仲裁——信贷这类「策略即硬规则」领域，
+        # 规则是权威，LLM 全量跑反而引入算术/规则应用误差（实测 66.7% vs 规则 96.7%）
+        if self.pack.rule_first and self.pack.rule_baseline is not None:
+            rule_result = self._rule_baseline(incident)
+            if rule_result["root_cause_class"] != "unknown":
+                rule_result["source"] = "rule_primary"
+                metrics.record_degrade("none")
+                metrics.record_class(rule_result["root_cause_class"])
+                return rule_result
+            # 灰区：升级 LLM 仲裁；LLM 结论可用时标注升级来源
+            if self.llm.is_configured:
+                try:
+                    result = await self.llm.chat_json(
+                        system_prompt=self._build_system(),
+                        user_payload=_json.dumps(incident, ensure_ascii=False),
+                        budget=budget,
+                    )
+                    result["root_cause_class"] = self._validate_class(result.get("root_cause_class"))
+                    result["confidence"] = _as_float(result.get("confidence"))
+                    result["evidence"] = str(result.get("evidence") or "")
+                    result["suggested_action"] = str(result.get("suggested_action") or "")
+                    self._apply_evidence_gate(result, incident)
+                    result["source"] = "llm_arbiter"
+                    result["llm_provider"] = result.pop("_provider", "unknown")
+                    result["escalated_reason"] = rule_result["evidence"]
+                    metrics.record_degrade("none")
+                    metrics.record_confidence(result["confidence"])
+                    metrics.record_class(result["root_cause_class"])
+                    return result
+                except Exception as e:
+                    code = getattr(e, "code", "provider_error")
+                    metrics.record_degrade(code)
+                    rule_result["source"] = "rule_fallback"
+                    rule_result["degraded"] = True
+                    rule_result["degraded_reason"] = f"灰区升级 LLM 失败: {str(e)[:150]}"
+                    rule_result["degraded_code"] = code
+                    metrics.record_class(rule_result["root_cause_class"])
+                    return rule_result
+            # LLM 未配置：灰区如实转人工
+            rule_result["source"] = "rule_fallback"
+            metrics.record_degrade("not_configured")
+            metrics.record_class(rule_result["root_cause_class"])
+            return rule_result
+
         if self.llm.is_configured:
             try:
                 result = await self.llm.chat_json(

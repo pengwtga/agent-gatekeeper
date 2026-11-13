@@ -25,6 +25,7 @@
 | [`T2-06-observability-dashboard.md`](T2-06-observability-dashboard.md) | 可观测面板（分钟级趋势 + 请求流水） |
 | [`T3-00-rag-retrieval-eval.md`](T3-00-rag-retrieval-eval.md) | RAG 检索评测（Recall/MRR + 阈值扫描，T3 前置） |
 | [`T5-00-domain-pack-and-tools.md`](T5-00-domain-pack-and-tools.md) | 泛化三件事：Domain Pack 剥离 + 工具调用层 + CSA 第二领域验证 |
+| [`T5-01-assistant-kb-pack.md`](T5-01-assistant-kb-pack.md) | 助手知识库 Pack 化（AssistantSpec）+ 三域 KB/评测集扩充 + bigram 打分改造 |
 | [`T1-06-startup-and-provider.md`](T1-06-startup-and-provider.md) | 接真 Provider 后暴露的启动期问题（预热阻塞 / 429 误判 / 空 reason） |
 | [`T6-01-main-py-slim.md`](T6-01-main-py-slim.md) | main.py 瘦身（340 行页面代码抽出） |
 | [`T6-05-ui-shell-and-obs-split.md`](T6-05-ui-shell-and-obs-split.md) | 左侧栏外框 + 可观测拆三页（共享 metrics context） |

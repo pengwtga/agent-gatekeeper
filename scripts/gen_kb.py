@@ -3,13 +3,13 @@
 30 条合成历史工单，覆盖 5 类根因 × 6 种真实变体，作为 RAG 值班助手的知识库。
 内容基于 SSRM 真实 oncall 处置经验编写。
 
-用法：python scripts/gen_kb.py  →  data/kb_tickets.jsonl
+用法：python scripts/gen_kb.py  →  data/ssrm/kb_tickets.jsonl
 """
 
 import json
 from pathlib import Path
 
-OUT = Path(__file__).parent.parent / "data" / "kb_tickets.jsonl"
+OUT = Path(__file__).parent.parent / "data" / "ssrm" / "kb_tickets.jsonl"
 
 # (根因类别, 现象标题, 症状描述, 处置动作, 处置过程/复盘)
 TICKETS = [

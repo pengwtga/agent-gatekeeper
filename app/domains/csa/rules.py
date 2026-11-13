@@ -38,8 +38,8 @@ def rule_baseline(incident: dict[str, Any]) -> dict[str, Any]:
         return _make("refund_dispute", 0.85, "命中退款关键字（退款/退货/未到账）")
     if any(kw in text for kw in ("发票", "开票", "抬头", "补寄发票")):
         return _make("invoice_request", 0.88, "命中发票关键字（开票/抬头）")
-    if any(kw in text for kw in ("物流", "快递", "发货", "送达", "丢件", "停滞")) or order_status == "shipped":
-        return _make("logistics_delay", 0.8, "命中物流关键字或订单已发货未妥投")
+    if any(kw in text for kw in ("物流", "快递", "发货", "送达", "丢件", "停滞", "换货", "寄回")) or order_status == "shipped":
+        return _make("logistics_delay", 0.8, "命中物流关键字（含换货/寄回）或订单已发货未妥投")
     # 咨询类词面：疑问句特征
     if any(kw in text for kw in ("吗", "什么时候", "有没有", "支持", "多少", "能不能", "可以")):
         return _make("presale_consult", 0.75, "疑问句特征，无售后关键字，按售前咨询处理")

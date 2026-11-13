@@ -17,7 +17,7 @@ from app.domains.ssrm.taxonomy import ROLE_INTRO
 
 
 def _load_incidents() -> list[dict]:
-    path = Path(__file__).resolve().parents[2] / "data" / "incidents.jsonl"
+    path = Path(__file__).resolve().parents[2] / "data" / "ssrm" / "incidents.jsonl"
     return [json.loads(line) for line in path.open(encoding="utf-8") if line.strip()]
 
 

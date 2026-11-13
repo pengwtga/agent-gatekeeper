@@ -1,0 +1,40 @@
+{"query_id": "CRQ-000", "question": "催收场景·电话：M1 首次温和提醒（逾期 38 天 / 欠款 6800 元），标准话术和合规要点是什么", "relevant": ["CCLK-EARL-01"]}
+{"query_id": "CRQ-001", "question": "催收场景·短信：宽限期说明（逾期 3 天 / 欠款 1200 元），标准话术和合规要点是什么", "relevant": ["CCLK-EARL-02"]}
+{"query_id": "CRQ-002", "question": "催收场景·电话：还款日提醒升级（逾期 27 天 / 欠款 23000 元），标准话术和合规要点是什么", "relevant": ["CCLK-EARL-03"]}
+{"query_id": "CRQ-003", "question": "催收场景·IM 消息：自动扣款失败安抚（逾期 38 天 / 欠款 15000 元），标准话术和合规要点是什么", "relevant": ["CCLK-EARL-04"]}
+{"query_id": "CRQ-004", "question": "催收场景·IM 消息：M1 首次温和提醒（逾期 8 天 / 欠款 6800 元），标准话术和合规要点是什么", "relevant": ["CCLK-EARL-05"]}
+{"query_id": "CRQ-005", "question": "催收场景·短信：宽限期说明（逾期 45 天 / 欠款 6800 元），标准话术和合规要点是什么", "relevant": ["CCLK-EARL-06"]}
+{"query_id": "CRQ-006", "question": "催收场景·IM 消息：还款日提醒升级（逾期 38 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-EARL-07"]}
+{"query_id": "CRQ-007", "question": "催收场景·短信：自动扣款失败安抚（逾期 32 天 / 欠款 15000 元），标准话术和合规要点是什么", "relevant": ["CCLK-EARL-08"]}
+{"query_id": "CRQ-008", "question": "催收场景·电话：承诺还款登记（逾期 37 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-PROM-01"]}
+{"query_id": "CRQ-009", "question": "催收场景·短信：承诺失约跟进（逾期 28 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-PROM-02"]}
+{"query_id": "CRQ-010", "question": "催收场景·电话：部分还款接受（逾期 15 天 / 欠款 6800 元），标准话术和合规要点是什么", "relevant": ["CCLK-PROM-03"]}
+{"query_id": "CRQ-011", "question": "催收场景·电话：代偿人沟通（逾期 45 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-PROM-04"]}
+{"query_id": "CRQ-012", "question": "催收场景·IM 消息：承诺还款登记（逾期 38 天 / 欠款 15000 元），标准话术和合规要点是什么", "relevant": ["CCLK-PROM-05"]}
+{"query_id": "CRQ-013", "question": "催收场景·短信：承诺失约跟进（逾期 43 天 / 欠款 9800 元），标准话术和合规要点是什么", "relevant": ["CCLK-PROM-06"]}
+{"query_id": "CRQ-014", "question": "催收场景·IM 消息：部分还款接受（逾期 41 天 / 欠款 1200 元），标准话术和合规要点是什么", "relevant": ["CCLK-PROM-07"]}
+{"query_id": "CRQ-015", "question": "催收场景·电话：代偿人沟通（逾期 42 天 / 欠款 23000 元），标准话术和合规要点是什么", "relevant": ["CCLK-PROM-08"]}
+{"query_id": "CRQ-016", "question": "催收场景·电话：失业延期申请（逾期 42 天 / 欠款 15000 元），标准话术和合规要点是什么", "relevant": ["CCLK-HARD-01"]}
+{"query_id": "CRQ-017", "question": "催收场景·IM 消息：医疗困难协商（逾期 37 天 / 欠款 1200 元），标准话术和合规要点是什么", "relevant": ["CCLK-HARD-02"]}
+{"query_id": "CRQ-018", "question": "催收场景·短信：以贷养贷劝阻（逾期 13 天 / 欠款 6800 元），标准话术和合规要点是什么", "relevant": ["CCLK-HARD-03"]}
+{"query_id": "CRQ-019", "question": "催收场景·电话：协商方案复核（逾期 24 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-HARD-04"]}
+{"query_id": "CRQ-020", "question": "催收场景·电话：失业延期申请（逾期 41 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-HARD-05"]}
+{"query_id": "CRQ-021", "question": "催收场景·短信：医疗困难协商（逾期 5 天 / 欠款 6800 元），标准话术和合规要点是什么", "relevant": ["CCLK-HARD-06"]}
+{"query_id": "CRQ-022", "question": "催收场景·IM 消息：以贷养贷劝阻（逾期 23 天 / 欠款 6800 元），标准话术和合规要点是什么", "relevant": ["CCLK-HARD-07"]}
+{"query_id": "CRQ-023", "question": "催收场景·IM 消息：协商方案复核（逾期 6 天 / 欠款 15000 元），标准话术和合规要点是什么", "relevant": ["CCLK-HARD-08"]}
+{"query_id": "CRQ-024", "question": "催收场景·IM 消息：失联初步找回（逾期 20 天 / 欠款 9800 元），标准话术和合规要点是什么", "relevant": ["CCLK-LOST-01"]}
+{"query_id": "CRQ-025", "question": "催收场景·电话：紧急联系人边界（逾期 5 天 / 欠款 6800 元），标准话术和合规要点是什么", "relevant": ["CCLK-LOST-02"]}
+{"query_id": "CRQ-026", "question": "催收场景·IM 消息：换号未更新（逾期 1 天 / 欠款 15000 元），标准话术和合规要点是什么", "relevant": ["CCLK-LOST-03"]}
+{"query_id": "CRQ-027", "question": "催收场景·短信：复联后降级处理（逾期 29 天 / 欠款 15000 元），标准话术和合规要点是什么", "relevant": ["CCLK-LOST-04"]}
+{"query_id": "CRQ-028", "question": "催收场景·短信：失联初步找回（逾期 23 天 / 欠款 9800 元），标准话术和合规要点是什么", "relevant": ["CCLK-LOST-05"]}
+{"query_id": "CRQ-029", "question": "催收场景·电话：紧急联系人边界（逾期 12 天 / 欠款 9800 元），标准话术和合规要点是什么", "relevant": ["CCLK-LOST-06"]}
+{"query_id": "CRQ-030", "question": "催收场景·电话：换号未更新（逾期 23 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-LOST-07"]}
+{"query_id": "CRQ-031", "question": "催收场景·IM 消息：复联后降级处理（逾期 43 天 / 欠款 15000 元），标准话术和合规要点是什么", "relevant": ["CCLK-LOST-08"]}
+{"query_id": "CRQ-032", "question": "催收场景·IM 消息：威胁恐吓识别（逾期 32 天 / 欠款 23000 元），标准话术和合规要点是什么", "relevant": ["CCLK-COMP-01"]}
+{"query_id": "CRQ-033", "question": "催收场景·电话：冒充公检法识别（逾期 42 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-COMP-02"]}
+{"query_id": "CRQ-034", "question": "催收场景·短信：信息泄露防护（逾期 35 天 / 欠款 23000 元），标准话术和合规要点是什么", "relevant": ["CCLK-COMP-03"]}
+{"query_id": "CRQ-035", "question": "催收场景·IM 消息：外访合规边界（逾期 32 天 / 欠款 1200 元），标准话术和合规要点是什么", "relevant": ["CCLK-COMP-04"]}
+{"query_id": "CRQ-036", "question": "催收场景·短信：催收时间违规（逾期 4 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-COMP-05"]}
+{"query_id": "CRQ-037", "question": "催收场景·短信：暴力催收举报响应（逾期 45 天 / 欠款 3500 元），标准话术和合规要点是什么", "relevant": ["CCLK-COMP-06"]}
+{"query_id": "CRQ-038", "question": "催收场景·IM 消息：威胁恐吓识别（逾期 45 天 / 欠款 6800 元），标准话术和合规要点是什么", "relevant": ["CCLK-COMP-07"]}
+{"query_id": "CRQ-039", "question": "催收场景·短信：冒充公检法识别（逾期 42 天 / 欠款 15000 元），标准话术和合规要点是什么", "relevant": ["CCLK-COMP-08"]}

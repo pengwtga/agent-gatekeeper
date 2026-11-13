@@ -1,0 +1,130 @@
+{"query_id": "HRQ-000", "question": "供应商说他那单子同意都同意完一天了，我们系统里任务的影子都没有", "relevant": ["ONCALL-001", "ONCALL-002"]}
+{"query_id": "HRQ-001", "question": "国外那位审批人有时差，下班时间点的同意，单子挂了一整晚没人动", "relevant": ["ONCALL-003"]}
+{"query_id": "HRQ-002", "question": "发布窗口一过就恢复了，之前那波报错全是网关把请求掐掉了", "relevant": ["ONCALL-007", "ONCALL-008"]}
+{"query_id": "HRQ-003", "question": "同一笔请求来了两遍，第二条被拦下来说已经受理过了", "relevant": ["ONCALL-013"]}
+{"query_id": "HRQ-004", "question": "半夜跑的核对活儿两天没动静了，差异数字越攒越多", "relevant": ["ONCALL-021"]}
+{"query_id": "HRQ-005", "question": "搜索页能搜出这家供应商，按条件查库却翻不出来", "relevant": ["ONCALL-024"]}
+{"query_id": "HRQ-006", "question": "执照那栏交上来的是照片不是证件号码，校验自然过不去", "relevant": ["ONCALL-025"]}
+{"query_id": "HRQ-007", "question": "填的日期斜杠分隔月在前年在后，后端按年月日去解析直接报错了", "relevant": ["ONCALL-028"]}
+{"query_id": "HRQ-008", "question": "表单里有一项压根没填就提交了，必填校验没放行", "relevant": ["ONCALL-026"]}
+{"query_id": "HRQ-009", "question": "队列里的活儿越堆越多，半个钟头了还没清完", "relevant": ["ONCALL-011"]}
+{"query_id": "HRQ-010", "question": "值班求助，商家反馈注册提交后一直展示「审核中」，后台查审核单进度已是终态，这边是苏州电子元件，工单号 XF-883", "relevant": ["ONCALL-001-V1"]}
+{"query_id": "HRQ-011", "question": "值班求助，供应商反馈注册提交后始终显示「审核中」，管理端查审核单状态已是终态，这边是绍兴印染厂，值班群已同步进展", "relevant": ["ONCALL-001-V2"]}
+{"query_id": "HRQ-012", "question": "值班求助，供应商反映注册送出后一直显示「审核中」，后台查审核单状态已是终态，这边是宁波注塑件厂，重试 5 次未自动恢复", "relevant": ["ONCALL-001-V3"]}
+{"query_id": "HRQ-013", "question": "值班求助，供应商反馈注册提交后一直显示「审核中」，后台查审核单状态已是终态，这边是华东面料厂，距上次同步已 5 分钟", "relevant": ["ONCALL-001-V4"]}
+{"query_id": "HRQ-014", "question": "值班求助，对账脚本告警：那边的流程 工单已 FINISHED 但 咱们系统 无对应注册记录，这边是义乌小商品供应链，发生在发布窗口内", "relevant": ["ONCALL-002-V1"]}
+{"query_id": "HRQ-015", "question": "值班求助，对账脚本告警：那边的流程 工单已 FINISHED 但 咱们系统 无对应注册记录，这边是厦门运动器材，发生在发布窗口内", "relevant": ["ONCALL-002-V2"]}
+{"query_id": "HRQ-016", "question": "值班求助，对账脚本告警：那边的流程 工单已 FINISHED 但 咱们系统 无对应注册记录，这边是武汉光电科技，发生在发布窗口内", "relevant": ["ONCALL-002-V3"]}
+{"query_id": "HRQ-017", "question": "值班求助，对账程序报警：那边的流程 工单已 FINISHED 但 咱们系统 无对应注册记录，这边是东莞塑胶制品，重试 30 次未自动恢复", "relevant": ["ONCALL-002-V4"]}
+{"query_id": "HRQ-018", "question": "值班求助，海外时区审核人在非工作时间审核，商家等待超过 8 小时，这边是杭州物流服务，发生在发布窗口内", "relevant": ["ONCALL-003-V1"]}
+{"query_id": "HRQ-019", "question": "值班求助，海外时区审核人在非工作时间审核，供应商等待超过 8 小时，这边是宁波注塑件厂，工单号 XF-888", "relevant": ["ONCALL-003-V2"]}
+{"query_id": "HRQ-020", "question": "值班求助，海外时区审核人在非工作时间审核，供应商等待超过 8 小时，这边是厦门运动器材，发生在发布窗口内", "relevant": ["ONCALL-003-V3"]}
+{"query_id": "HRQ-021", "question": "值班求助，海外时区审核人在非工作时间审核，供应商等待超过 8 小时，这边是广州五金制品，这边是 28 笔记录", "relevant": ["ONCALL-003-V4"]}
+{"query_id": "HRQ-022", "question": "值班求助，那边的流程 通知配置指向旧域名，通知全部失败，这边是华东面料厂，值班群已同步进展", "relevant": ["ONCALL-004-V1"]}
+{"query_id": "HRQ-023", "question": "值班求助，那边的流程 通知配置指向旧域名，通知全部失败，这边是青岛食品配料，重试 4 次未自动恢复", "relevant": ["ONCALL-004-V2"]}
+{"query_id": "HRQ-024", "question": "值班求助，那边的流程 通知配置指向旧域名，通知全部异常，这边是苏州电子元件，距上次联动已 8 分钟", "relevant": ["ONCALL-004-V3"]}
+{"query_id": "HRQ-025", "question": "值班求助，那边的流程 通知配置指向旧域名，通知全部失败，这边是青岛食品配料，重试 8 次未自动恢复", "relevant": ["ONCALL-004-V4"]}
+{"query_id": "HRQ-026", "question": "值班求助，审核人转办给他人后，原通知丢失，这边是广州五金制品，距上次同步已 26 分钟", "relevant": ["ONCALL-005-V1"]}
+{"query_id": "HRQ-027", "question": "值班求助，审核人转办给他人后，原通知丢失，这边是苏州电子元件，距上次同步已 9 分钟", "relevant": ["ONCALL-005-V2"]}
+{"query_id": "HRQ-028", "question": "值班求助，审核人转办给他人后，原通知丢失，这边是武汉光电科技，值班群已联动进展", "relevant": ["ONCALL-005-V3"]}
+{"query_id": "HRQ-029", "question": "值班求助，审核人转办给他人后，原通知丢失，这边是武汉光电科技，工单号 XF-889", "relevant": ["ONCALL-005-V4"]}
+{"query_id": "HRQ-030", "question": "值班求助，审核单展示已驳回，咱们系统 侧进度仍为审核中，这边是佛山家具五金，工单号 XF-883", "relevant": ["ONCALL-006-V1"]}
+{"query_id": "HRQ-031", "question": "值班求助，审核单显示已驳回，咱们系统 侧状态仍为审核中，这边是武汉光电科技，距上次同步已 23 分钟", "relevant": ["ONCALL-006-V2"]}
+{"query_id": "HRQ-032", "question": "值班求助，审核单显示已驳回，咱们系统 侧状态仍为审核中，这边是天津包装材料，发生在发布窗口内", "relevant": ["ONCALL-006-V3"]}
+{"query_id": "HRQ-033", "question": "值班求助，审核单显示已驳回，咱们系统 侧状态仍为审核中，这边是宁波注塑件厂，这边是 2 笔记录", "relevant": ["ONCALL-006-V4"]}
+{"query_id": "HRQ-034", "question": "值班求助，主数据那边 例行发布期间 createSupplier 批量超时，这边是深圳模具加工，这边是 27 笔记录", "relevant": ["ONCALL-007-V1"]}
+{"query_id": "HRQ-035", "question": "值班求助，主数据那边 例行发布期间 createSupplier 批量超时，这边是华东面料厂，距上次同步已 26 分钟", "relevant": ["ONCALL-007-V2"]}
+{"query_id": "HRQ-036", "question": "值班求助，主数据那边 例行发布期间 createSupplier 批量超时，这边是深圳模具加工，重试 26 次未自动恢复", "relevant": ["ONCALL-007-V3"]}
+{"query_id": "HRQ-037", "question": "值班求助，主数据那边 例行发布期间 createSupplier 批量超限，这边是宁波注塑件厂，这边是 9 笔记录", "relevant": ["ONCALL-007-V4"]}
+{"query_id": "HRQ-038", "question": "值班求助，主数据那边 接口网关超时，重试 4 次均失败，这边是绍兴印染厂，重试 4 次未自动恢复", "relevant": ["ONCALL-008-V1"]}
+{"query_id": "HRQ-039", "question": "值班求助，主数据那边 接口网关超时，重试 4 次均失败，这边是天津包装材料，距上次同步已 29 分钟", "relevant": ["ONCALL-008-V2"]}
+{"query_id": "HRQ-040", "question": "值班求助，主数据那边 接口网关超时，重试 4 次均异常，这边是深圳模具加工，重试 22 次未自动恢复", "relevant": ["ONCALL-008-V3"]}
+{"query_id": "HRQ-041", "question": "值班求助，主数据那边 服务网关超限，重试 4 次均失败，这边是广州五金制品，发生在发布窗口内", "relevant": ["ONCALL-008-V4"]}
+{"query_id": "HRQ-042", "question": "值班求助，大批量变更触发 主数据那边 接口限流（429），这边是武汉光电科技，工单号 XF-884", "relevant": ["ONCALL-009-V1"]}
+{"query_id": "HRQ-043", "question": "值班求助，大批量变更触发 主数据那边 接口限流（429），这边是青岛食品配料，值班群已同步进展", "relevant": ["ONCALL-009-V2"]}
+{"query_id": "HRQ-044", "question": "值班求助，大批量变更触发 主数据那边 接口限流（429），这边是义乌小商品供应链，重试 19 次未自动恢复", "relevant": ["ONCALL-009-V3"]}
+{"query_id": "HRQ-045", "question": "值班求助，大批量变更触发 主数据那边 服务限流（429），这边是苏州电子元件，距上次同步已 22 分钟", "relevant": ["ONCALL-009-V4"]}
+{"query_id": "HRQ-046", "question": "值班求助，调用主数据平台连接被重置（CONN_RESET），这边是厦门运动器材，距上次同步已 12 分钟", "relevant": ["ONCALL-010-V1"]}
+{"query_id": "HRQ-047", "question": "值班求助，调用主数据平台连接被重置（CONN_RESET），这边是佛山家具五金，重试 7 次未自动恢复", "relevant": ["ONCALL-010-V2"]}
+{"query_id": "HRQ-048", "question": "值班求助，调用主数据平台连接被重置（CONN_RESET），这边是青岛食品配料，工单号 XF-885", "relevant": ["ONCALL-010-V3"]}
+{"query_id": "HRQ-049", "question": "值班求助，调用主数据平台连接被重置（CONN_RESET），这边是山东纺织集团，工单号 XF-881", "relevant": ["ONCALL-010-V4"]}
+{"query_id": "HRQ-050", "question": "值班求助，同步记录队列积压 200+，延迟 30 分钟，这边是杭州物流服务，值班群已同步进展", "relevant": ["ONCALL-011-V1"]}
+{"query_id": "HRQ-051", "question": "值班求助，同步记录队列积压 200+，延迟 30 分钟，这边是杭州物流服务，重试 21 次未自动恢复", "relevant": ["ONCALL-011-V2"]}
+{"query_id": "HRQ-052", "question": "值班求助，联动记录队列积压 200+，延迟 30 分钟，这边是苏州电子元件，这边是 7 笔记录", "relevant": ["ONCALL-011-V3"]}
+{"query_id": "HRQ-053", "question": "值班求助，同步记录队列积压 200+，延迟 30 分钟，这边是深圳模具加工，距上次同步已 30 分钟", "relevant": ["ONCALL-011-V4"]}
+{"query_id": "HRQ-054", "question": "值班求助，服务器 DNS 解析 主数据那边 域名偶发失败，这边是佛山家具五金，工单号 XF-882", "relevant": ["ONCALL-012-V1"]}
+{"query_id": "HRQ-055", "question": "值班求助，服务器 DNS 解析 主数据那边 域名偶发失败，这边是武汉光电科技，工单号 XF-885", "relevant": ["ONCALL-012-V2"]}
+{"query_id": "HRQ-056", "question": "值班求助，服务器 DNS 解析 主数据那边 域名偶发异常，这边是天津包装材料，距上次联动已 21 分钟", "relevant": ["ONCALL-012-V3"]}
+{"query_id": "HRQ-057", "question": "值班求助，服务器 DNS 解析 主数据那边 域名偶发失败，这边是天津包装材料，值班群已同步进展", "relevant": ["ONCALL-012-V4"]}
+{"query_id": "HRQ-058", "question": "值班求助，同一商家 10 秒内两次注册请求，第二笔报申请已存在，这边是佛山家具五金，这边是 7 笔记录", "relevant": ["ONCALL-013-V1"]}
+{"query_id": "HRQ-059", "question": "值班求助，同一供应商 10 秒内两次注册请求，第二笔报申请已存在，这边是宁波注塑件厂，发生在发布窗口内", "relevant": ["ONCALL-013-V2"]}
+{"query_id": "HRQ-060", "question": "值班求助，同一供应商 10 秒内两次注册请求，第二笔报申请已存在，这边是宁波注塑件厂，距上次联动已 14 分钟", "relevant": ["ONCALL-013-V3"]}
+{"query_id": "HRQ-061", "question": "值班求助，同一供应商 10 秒内两次注册请求，第二笔报申请已存在，这边是广州五金制品，距上次同步已 23 分钟", "relevant": ["ONCALL-013-V4"]}
+{"query_id": "HRQ-062", "question": "值班求助，同一注册事件被消费两次，这边是苏州电子元件，值班群已同步进展", "relevant": ["ONCALL-014-V1"]}
+{"query_id": "HRQ-063", "question": "值班求助，同一注册事件被消费两次，这边是广州五金制品，重试 14 次未自动恢复", "relevant": ["ONCALL-014-V2"]}
+{"query_id": "HRQ-064", "question": "值班求助，同一注册事件被消费两次，这边是青岛食品配料，发生在发布窗口内", "relevant": ["ONCALL-014-V3"]}
+{"query_id": "HRQ-065", "question": "值班求助，同一注册事件被消费两次，这边是山东纺织集团，重试 3 次未自动恢复", "relevant": ["ONCALL-014-V4"]}
+{"query_id": "HRQ-066", "question": "值班求助，用户提交后刷新页面导致表单重放，这边是东莞塑胶制品，距上次同步已 18 分钟", "relevant": ["ONCALL-015-V1"]}
+{"query_id": "HRQ-067", "question": "值班求助，用户提交后刷新页面导致表单重放，这边是佛山家具五金，发生在发布窗口内", "relevant": ["ONCALL-015-V2"]}
+{"query_id": "HRQ-068", "question": "值班求助，用户送出后刷新页面导致表单重放，这边是绍兴印染厂，距上次联动已 2 分钟", "relevant": ["ONCALL-015-V3"]}
+{"query_id": "HRQ-069", "question": "值班求助，用户提交后刷新页面导致表单重放，这边是东莞塑胶制品，距上次同步已 12 分钟", "relevant": ["ONCALL-015-V4"]}
+{"query_id": "HRQ-070", "question": "值班求助，同一商务双开两个页面同时提交不同商家，这边是山东纺织集团，重试 27 次未自动恢复", "relevant": ["ONCALL-016-V1"]}
+{"query_id": "HRQ-071", "question": "值班求助，同一商务双开两个页面同时提交不同供应商，这边是佛山家具五金，工单号 XF-882", "relevant": ["ONCALL-016-V2"]}
+{"query_id": "HRQ-072", "question": "值班求助，同一商务双开两个页面同时送出不同供应商，这边是天津包装材料，这边是 17 笔记录", "relevant": ["ONCALL-016-V3"]}
+{"query_id": "HRQ-073", "question": "值班求助，同一商务双开两个页面同时提交不同供应商，这边是苏州电子元件，这边是 2 笔记录", "relevant": ["ONCALL-016-V4"]}
+{"query_id": "HRQ-074", "question": "值班求助，网络超时后客户端自动重试，服务端实际已处理成功，这边是东莞塑胶制品，发生在发布窗口内", "relevant": ["ONCALL-017-V1"]}
+{"query_id": "HRQ-075", "question": "值班求助，网络超时后客户端自动重试，服务端实际已处理成功，这边是苏州电子元件，值班群已同步进展", "relevant": ["ONCALL-017-V2"]}
+{"query_id": "HRQ-076", "question": "值班求助，网络超时后客户端自动重试，服务端实际已处理成功，这边是广州五金制品，这边是 22 笔记录", "relevant": ["ONCALL-017-V3"]}
+{"query_id": "HRQ-077", "question": "值班求助，网络超限后客户端自动重试，服务端实际已处理成功，这边是武汉光电科技，重试 24 次未自动恢复", "relevant": ["ONCALL-017-V4"]}
+{"query_id": "HRQ-078", "question": "值班求助，同一准入被两个商务先后发起，这边是山东纺织集团，值班群已同步进展", "relevant": ["ONCALL-018-V1"]}
+{"query_id": "HRQ-079", "question": "值班求助，同一准入被两个商务先后发起，这边是宁波注塑件厂，距上次同步已 11 分钟", "relevant": ["ONCALL-018-V2"]}
+{"query_id": "HRQ-080", "question": "值班求助，同一准入被两个商务先后发起，这边是东莞塑胶制品，这边是 30 笔记录", "relevant": ["ONCALL-018-V3"]}
+{"query_id": "HRQ-081", "question": "值班求助，同一准入被两个商务先后发起，这边是山东纺织集团，这边是 15 笔记录", "relevant": ["ONCALL-018-V4"]}
+{"query_id": "HRQ-082", "question": "值班求助，夜间对账：主数据那边 已有商家但 Dora 缺联系人，这边是深圳模具加工，距上次同步已 16 分钟", "relevant": ["ONCALL-019-V1"]}
+{"query_id": "HRQ-083", "question": "值班求助，夜间对账：主数据那边 已有供应商但 Dora 缺联系人，这边是东莞塑胶制品，工单号 XF-889", "relevant": ["ONCALL-019-V2"]}
+{"query_id": "HRQ-084", "question": "值班求助，夜间对账：主数据那边 已有供应商但 Dora 缺联系人，这边是宁波注塑件厂，值班群已联动进展", "relevant": ["ONCALL-019-V3"]}
+{"query_id": "HRQ-085", "question": "值班求助，夜间对账：主数据那边 已有供应商但 Dora 缺联系人，这边是山东纺织集团，工单号 XF-889", "relevant": ["ONCALL-019-V4"]}
+{"query_id": "HRQ-086", "question": "值班求助，商家改名后 主数据那边 更新成功，Dora 侧仍展示旧名，这边是武汉光电科技，值班群已同步进展", "relevant": ["ONCALL-020-V1"]}
+{"query_id": "HRQ-087", "question": "值班求助，供应商改名后 主数据那边 更新成功，Dora 侧仍显示旧名，这边是厦门运动器材，这边是 22 笔记录", "relevant": ["ONCALL-020-V2"]}
+{"query_id": "HRQ-088", "question": "值班求助，供应商改名后 主数据那边 更新成功，Dora 侧仍显示旧名，这边是义乌小商品供应链，重试 18 次未自动恢复", "relevant": ["ONCALL-020-V3"]}
+{"query_id": "HRQ-089", "question": "值班求助，供应商改名后 主数据那边 更新成功，Dora 侧仍显示旧名，这边是天津包装材料，重试 17 次未自动恢复", "relevant": ["ONCALL-020-V4"]}
+{"query_id": "HRQ-090", "question": "值班求助，连续两天对账没有产生补推记录，积压差异 5 笔，这边是华东面料厂，工单号 XF-888", "relevant": ["ONCALL-021-V1"]}
+{"query_id": "HRQ-091", "question": "值班求助，连续两天对账没有产生补推记录，积压差异 5 笔，这边是青岛食品配料，重试 14 次未自动恢复", "relevant": ["ONCALL-021-V2"]}
+{"query_id": "HRQ-092", "question": "值班求助，连续两天对账没有产生补推记录，积压差异 5 笔，这边是山东纺织集团，发生在发布窗口内", "relevant": ["ONCALL-021-V3"]}
+{"query_id": "HRQ-093", "question": "值班求助，连续两天对账没有产生补推记录，积压差异 5 笔，这边是杭州物流服务，值班群已同步进展", "relevant": ["ONCALL-021-V4"]}
+{"query_id": "HRQ-094", "question": "值班求助，快照对比发现 23 家商家门户侧联系人字段为空，这边是深圳模具加工，距上次同步已 16 分钟", "relevant": ["ONCALL-022-V1"]}
+{"query_id": "HRQ-095", "question": "值班求助，快照对比发现 23 家供应商门户侧联系人字段为空，这边是义乌小商品供应链，工单号 XF-886", "relevant": ["ONCALL-022-V2"]}
+{"query_id": "HRQ-096", "question": "值班求助，快照对比发现 23 家供应商门户侧联系人字段为空，这边是武汉光电科技，这边是 10 笔记录", "relevant": ["ONCALL-022-V3"]}
+{"query_id": "HRQ-097", "question": "值班求助，快照对比发现 23 家供应商门户侧联系人字段为空，这边是深圳模具加工，这边是 12 笔记录", "relevant": ["ONCALL-022-V4"]}
+{"query_id": "HRQ-098", "question": "值班求助，咱们系统 展示准入完成，Dora 展示待激活，这边是广州五金制品，发生在发布窗口内", "relevant": ["ONCALL-023-V1"]}
+{"query_id": "HRQ-099", "question": "值班求助，咱们系统 显示准入完成，Dora 显示待激活，这边是义乌小商品供应链，发生在发布窗口内", "relevant": ["ONCALL-023-V2"]}
+{"query_id": "HRQ-100", "question": "值班求助，咱们系统 显示准入完成，Dora 显示待激活，这边是绍兴印染厂，重试 18 次未自动恢复", "relevant": ["ONCALL-023-V3"]}
+{"query_id": "HRQ-101", "question": "值班求助，咱们系统 显示准入完成，Dora 显示待激活，这边是厦门运动器材，重试 26 次未自动恢复", "relevant": ["ONCALL-023-V4"]}
+{"query_id": "HRQ-102", "question": "值班求助，ES 搜索结果与数据库查询结果差 2 家商家，这边是天津包装材料，值班群已同步进展", "relevant": ["ONCALL-024-V1"]}
+{"query_id": "HRQ-103", "question": "值班求助，ES 搜索结果与数据库查询结果差 2 家供应商，这边是深圳模具加工，值班群已同步进展", "relevant": ["ONCALL-024-V2"]}
+{"query_id": "HRQ-104", "question": "值班求助，ES 搜索结果与数据库查询结果差 2 家供应商，这边是华东面料厂，值班群已联动进展", "relevant": ["ONCALL-024-V3"]}
+{"query_id": "HRQ-105", "question": "值班求助，ES 搜索结果与数据库查询结果差 2 家供应商，这边是义乌小商品供应链，重试 14 次未自动恢复", "relevant": ["ONCALL-024-V4"]}
+{"query_id": "HRQ-106", "question": "值班求助，营业执照编号提交的是图片路径而非编号，这边是苏州电子元件，值班群已同步进展", "relevant": ["ONCALL-025-V1"]}
+{"query_id": "HRQ-107", "question": "值班求助，营业执照编号提交的是图片路径而非编号，这边是武汉光电科技，重试 20 次未自动恢复", "relevant": ["ONCALL-025-V2"]}
+{"query_id": "HRQ-108", "question": "值班求助，营业执照编号送出的是图片路径而非编号，这边是广州五金制品，发生在发布窗口内", "relevant": ["ONCALL-025-V3"]}
+{"query_id": "HRQ-109", "question": "值班求助，营业执照编号提交的是图片路径而非编号，这边是华东面料厂，重试 13 次未自动恢复", "relevant": ["ONCALL-025-V4"]}
+{"query_id": "HRQ-110", "question": "值班求助，Dora 注册表单少传 site_code，后端校验失败，这边是青岛食品配料，这边是 28 笔记录", "relevant": ["ONCALL-026-V1"]}
+{"query_id": "HRQ-111", "question": "值班求助，Dora 注册表单少传 site_code，后端校验失败，这边是绍兴印染厂，重试 25 次未自动恢复", "relevant": ["ONCALL-026-V2"]}
+{"query_id": "HRQ-112", "question": "值班求助，Dora 注册表单少传 site_code，后端校验异常，这边是青岛食品配料，值班群已联动进展", "relevant": ["ONCALL-026-V3"]}
+{"query_id": "HRQ-113", "question": "值班求助，Dora 注册表单少传 site_code，后端校验失败，这边是东莞塑胶制品，值班群已同步进展", "relevant": ["ONCALL-026-V4"]}
+{"query_id": "HRQ-114", "question": "值班求助，商家类型传了「服务商」，后端枚举校验失败，这边是东莞塑胶制品，工单号 XF-889", "relevant": ["ONCALL-027-V1"]}
+{"query_id": "HRQ-115", "question": "值班求助，供应商类型传了「服务商」，后端枚举校验失败，这边是东莞塑胶制品，这边是 6 笔记录", "relevant": ["ONCALL-027-V2"]}
+{"query_id": "HRQ-116", "question": "值班求助，供应商类型传了「服务商」，后端枚举校验异常，这边是绍兴印染厂，这边是 5 笔记录", "relevant": ["ONCALL-027-V3"]}
+{"query_id": "HRQ-117", "question": "值班求助，供应商类型传了「服务商」，后端枚举校验失败，这边是武汉光电科技，值班群已同步进展", "relevant": ["ONCALL-027-V4"]}
+{"query_id": "HRQ-118", "question": "值班求助，资质有效期格式前端传 MM/DD/YYYY，后端期望 YYYY-MM-DD，这边是武汉光电科技，距上次同步已 5 分钟", "relevant": ["ONCALL-028-V1"]}
+{"query_id": "HRQ-119", "question": "值班求助，资质有效期格式前端传 MM/DD/YYYY，后端期望 YYYY-MM-DD，这边是华东面料厂，值班群已同步进展", "relevant": ["ONCALL-028-V2"]}
+{"query_id": "HRQ-120", "question": "值班求助，资质有效期格式前端传 MM/DD/YYYY，后端期望 YYYY-MM-DD，这边是华东面料厂，发生在发布窗口内", "relevant": ["ONCALL-028-V3"]}
+{"query_id": "HRQ-121", "question": "值班求助，资质有效期格式前端传 MM/DD/YYYY，后端期望 YYYY-MM-DD，这边是绍兴印染厂，工单号 XF-883", "relevant": ["ONCALL-028-V4"]}
+{"query_id": "HRQ-122", "question": "值班求助，前端把金额传成科学计数法字符串，这边是佛山家具五金，发生在发布窗口内", "relevant": ["ONCALL-029-V1"]}
+{"query_id": "HRQ-123", "question": "值班求助，前端把金额传成科学计数法字符串，这边是宁波注塑件厂，值班群已同步进展", "relevant": ["ONCALL-029-V2"]}
+{"query_id": "HRQ-124", "question": "值班求助，前端把金额传成科学计数法字符串，这边是苏州电子元件，这边是 14 笔记录", "relevant": ["ONCALL-029-V3"]}
+{"query_id": "HRQ-125", "question": "值班求助，前端把金额传成科学计数法字符串，这边是深圳模具加工，这边是 7 笔记录", "relevant": ["ONCALL-029-V4"]}
+{"query_id": "HRQ-126", "question": "值班求助，前端把空值传成空字符串，后端判空逻辑不一致，这边是杭州物流服务，距上次同步已 12 分钟", "relevant": ["ONCALL-030-V1"]}
+{"query_id": "HRQ-127", "question": "值班求助，前端把空值传成空字符串，后端判空逻辑不一致，这边是东莞塑胶制品，这边是 21 笔记录", "relevant": ["ONCALL-030-V2"]}
+{"query_id": "HRQ-128", "question": "值班求助，前端把空值传成空字符串，后端判空逻辑不一致，这边是宁波注塑件厂，距上次联动已 13 分钟", "relevant": ["ONCALL-030-V3"]}
+{"query_id": "HRQ-129", "question": "值班求助，前端把空值传成空字符串，后端判空逻辑不一致，这边是天津包装材料，工单号 XF-886", "relevant": ["ONCALL-030-V4"]}

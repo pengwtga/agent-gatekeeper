@@ -55,7 +55,7 @@ def bench_pipeline(n_docs: int, top_k: int = 3, seed: int = 42) -> dict:
     from app.agents.rag_assistant import RagAssistant
     from app.core.llm_client import llm_client
 
-    kb = Path(__file__).resolve().parents[1] / "data" / "kb_tickets.jsonl"
+    kb = Path(__file__).resolve().parents[1] / "data" / "ssrm" / "kb_tickets.jsonl"
     base = [json.loads(line) for line in kb.open(encoding="utf-8") if line.strip()]
 
     docs = []
@@ -72,7 +72,7 @@ def bench_pipeline(n_docs: int, top_k: int = 3, seed: int = 42) -> dict:
     rag.docs = docs
     rag._ready = True
 
-    data_dir = Path(__file__).resolve().parents[1] / "data"
+    data_dir = Path(__file__).resolve().parents[1] / "data" / "ssrm"
     questions = [json.loads(line)["question"] for f in ("rag_queries.jsonl", "rag_queries_hard.jsonl")
                  for line in (data_dir / f).open(encoding="utf-8") if line.strip()]
 
