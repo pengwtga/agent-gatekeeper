@@ -9,6 +9,8 @@ __pycache__/
 # 运行产物
 *.log
 data/kb_vectors*.json
+data/escalations.db
+data/escalations.db-*
 
 # 前端
 frontend/node_modules/

@@ -28,6 +28,7 @@
 | [`T3-02-evidence-refs.md`](T3-02-evidence-refs.md) | 证据判据换结构化引用（消除分数反转），v1/v2 回归对比 + 标定脚本 |
 | [`T5-00-domain-pack-and-tools.md`](T5-00-domain-pack-and-tools.md) | 泛化三件事：Domain Pack 剥离 + 工具调用层 + CSA 第二领域验证 |
 | [`T5-01-assistant-kb-pack.md`](T5-01-assistant-kb-pack.md) | 助手知识库 Pack 化（AssistantSpec）+ 三域 KB/评测集扩充 + bigram 打分改造 |
+| [`T5-02-handle-pipeline.md`](T5-02-handle-pipeline.md) | 处置编排：确定性状态机 + 只读信息收集 + SQLite 人工接管续跑（credit 错分 2/2 全部被处置层拦下） |
 | [`T1-06-startup-and-provider.md`](T1-06-startup-and-provider.md) | 接真 Provider 后暴露的启动期问题（预热阻塞 / 429 误判 / 空 reason） |
 | [`T6-01-main-py-slim.md`](T6-01-main-py-slim.md) | main.py 瘦身（340 行页面代码抽出） |
 | [`T6-05-ui-shell-and-obs-split.md`](T6-05-ui-shell-and-obs-split.md) | 左侧栏外框 + 可观测拆三页（共享 metrics context） |
@@ -43,7 +44,7 @@
 | **T2** | 可观测 | ✅ 已完成（24 项验收全通过；容器实测 `docker logs` 逐行可解析 JSON；T2-6 面板已上页，接口 + 页面共 7 项验收） |
 | T3 | Prompt 版本化 + 回归 | ✅ 全部完成：T3-0 检索评测集 + Recall/MRR + 阈值扫描；T3-1~4 prompts/ + 启动校验 + 20 条回归集 + `make eval`；T3-5 证据改结构化引用（v2 基线：回归 0.95 / 困难 0.96，回归集门禁误杀 3→0） |
 | T4 | 检索升级 | ✅ 已完成：T4-2/3 被 T3-0 超越（230 条查询 + Recall/MRR/双口径）；T4-6 修重排伪造分数（keyword+rerank 门禁失效 bug）；T4-5 向量缓存按 KB 内容 hash 失效；T4-4 RRF 混合检索（顺带修复评测 PYTHONHASHSEED 漂移）；T4-1 切块实验结论「不做」（resolution 入索引全线变差，credit 87.5%→52.5%） |
-| T5 | 状态机 + 工具（LangGraph） | ⏳ T5-0 已完成（自研工具层 + Domain Pack + CSA 领域 96.7%），LangGraph 状态机未做 |
+| T5 | 状态机 + 工具 | ✅ T5-0（自研工具层 + Domain Pack）+ T5-02（处置编排状态机 + 人工接管续跑，不用 LangGraph，理由见文档） |
 | T6 | 工程卫生 | ⏳ T6-1 已完成（main.py 593 → 273 行），T6-5 已完成（左侧栏 + 可观测拆页），T6-6 已完成（app/ 分包），T6-2~4 未做 |
 | T7 | 观测与诊断平台化（千问 JD 定向） | ⏳ T7-2 一阶段完成（内存版链路 + 瀑布图），SQLite 化未做 |
 

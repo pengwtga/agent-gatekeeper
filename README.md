@@ -53,7 +53,8 @@
 7. **评测内建**：根因分类有 `/eval` 端点 + 命令行脚本（常规集 100 条 + 困难集 25 条，准确率/延迟/混淆样例/规则基线对照）；RAG 检索有独立评测（Recall@1/@3、MRR@8、采信阈值扫描），检索通道选择和阈值均有数字依据
 8. **引擎与领域知识分离（Domain Pack）**：分类引擎只管机制（通道/门禁/校验），类别定义、few-shot、规则基线都是可插拔的领域包（`app/domains/ssrm`、`csa`、`credit`）——第二领域（客服）LLM 通道 96.7%；第三领域（信贷进件风险分类）反向验证了通道编排的重要性：小模型跑硬阈值领域仅 60~67%，引擎因此支持 **rule_first 规则先行**——规则直判（300 条明确区 100%）、灰区（dti 0.6~0.7 边界带）才升级 LLM 仲裁，仲裁结论仍过证据/置信度双门禁（实测判错的仲裁被证据门禁拦下转人工）；助手侧同样 Pack 化（AssistantSpec）：同一 RAG 引擎挂三份领域知识库，**三域均为完整「分类 + 助手」双 Agent 结构**（运维值班助手 / 电商坐席助手 / 信贷催员辅助，后者即 JD 语境的「催员辅助 Agent」）
 9. **通用工具调用层**：tool registry + LLM JSON mode 选工具 + 白名单/schema/置信度三道关（不用 Function Call/LangChain 的理由见 T5-00 文档）；内置 3 个只读工具，端点 `GET /tools`、`POST /tools/ask`
-10. **公网防护**：`/classify` `/assist` `/tools/ask` 单 IP 滑动窗口限速（20 次/分钟）；`/eval` 因单次请求会循环调用 LLM，要求 token 校验（`.env` 配置 `SSRM_AIOPS_EVAL_TOKEN`）
+10. **处置编排状态机（T5）**：`POST /handle` 把分类结果推进到处置——`intake → classify → enrich → decide` 确定性状态机（不用 LangGraph，编排不需要智能、每步留痕、步数/预算上界是结构保证，见 T5-02 文档）；人工介入场景自动收集只读简报；处置映射三分支（auto_dispose / human_review / escalate），human_review 中断快照落 SQLite 升级队列，人工批准后从断点续跑（`GET /escalations`、`POST /escalations/{id}/resolve`）；credit 30 条实测：**错分 2 条 100% 被处置层拦下转人工，0 条错误自动执行**
+11. **公网防护**：`/classify` `/assist` `/tools/ask` `/handle` 单 IP 滑动窗口限速（20 次/分钟）；`/eval` 因单次请求会循环调用 LLM，要求 token 校验（`.env` 配置 `SSRM_AIOPS_EVAL_TOKEN`）
 
 > 设计取舍的完整推演（为什么分类不用 RAG、unknown 治理闭环等）见 [docs/design-decisions.md](docs/design-decisions.md)。
 

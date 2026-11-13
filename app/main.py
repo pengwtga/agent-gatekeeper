@@ -18,6 +18,7 @@ import ipaddress
 import logging
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -25,9 +26,11 @@ from pydantic import BaseModel
 
 from app.core.budget import Budget
 from app.core.builtin_tools import build_default_registry
+from app.core.escalation import EscalationStore
 from app.core.tools import choose_and_run
 from app import prompts
 from app.agents.classifier import RootCauseClassifier
+from app.agents.pipeline import HandlePipeline
 from app.domains.credit import pack as credit_pack
 from app.domains.csa import pack as csa_pack
 from app.domains.ssrm import pack as ssrm_pack
@@ -43,16 +46,28 @@ from app.observability.tracing import span, traces
 setup_logging()
 logger = logging.getLogger(__name__)
 
-classifier = RootCauseClassifier(llm_client, ssrm_pack)
+# 多领域注册表（T5）：分类器 / 编排管线 / 领域包三张表同一个 key（pack.name）
+_domain_packs = (ssrm_pack, csa_pack, credit_pack)
+packs = {p.name: p for p in _domain_packs}
+classifier = RootCauseClassifier(llm_client, ssrm_pack)  # /eval 兼容旧引用（ssrm 域）
+classifiers = {p.name: RootCauseClassifier(llm_client, p) for p in _domain_packs}
 
 # 多领域助手注册表：每个声明了 assistant 规格的 pack 一个 RagAssistant 实例。
 # 引擎是同一个（检索+阈值+grounding），知识库/阈值/人设由 pack 注入 ——「机制与知识分离」
 assistants: dict[str, RagAssistant] = {
     _p.name: RagAssistant(llm_client, _p.assistant)
-    for _p in (ssrm_pack, csa_pack, credit_pack) if _p.assistant is not None
+    for _p in _domain_packs if _p.assistant is not None
 }
 rag = assistants["ssrm"]  # SSRM 值班助手：工具注册表等旧引用的默认实例
 registry = build_default_registry(rag)
+
+# 处置编排：每域一条管线；工具注册表目前只有 ssrm 有（builtin_tools 是 ssrm 知识面），
+# 其他域如实传 None——enrich 步骤会标注 skipped 而不是硬凑
+pipelines = {
+    name: HandlePipeline(c, registry if name == "ssrm" else None)
+    for name, c in classifiers.items()
+}
+escalations = EscalationStore(Path(settings.escalation_db))
 
 
 @asynccontextmanager
@@ -83,6 +98,7 @@ async def lifespan(app: FastAPI):
     await llm_client.aclose()
     for assistant in assistants.values():
         await assistant.aclose()
+    escalations.close()
     logger.info("连接池已关闭，进程退出", extra={"event": "app_stop", "stage": "shutdown", "outcome": "ok"})
 
 
@@ -172,6 +188,9 @@ async def root():
         "docs": "/docs",
         "endpoints": {
             "POST /classify": "单条事件根因分类（body: {\"incident\": {...}}）",
+            "POST /handle": "处置编排：分类 → 只读信息收集 → 确定性处置映射（human_review 自动落升级队列）",
+            "GET /escalations": "升级队列（?status=pending|resolved）",
+            "POST /escalations/{id}/resolve": "人工决议：批准类别后从中断快照续跑",
             "POST /eval": "数据集评测",
             "GET /stats": "数据集统计",
             "POST /assist": "值班助手问答（body: {\"question\": \"...\"}）",
@@ -197,6 +216,8 @@ async def health():
         "llm_usage": llm_client.usage,   # 进程累计 token 用量，成本可见的最小实现
         "classes": list(ssrm_pack.classes.keys()),
         "assistants": {name: a.mode for name, a in assistants.items()},
+        "pipelines": sorted(pipelines),
+        "escalations_pending": escalations.pending_count(),
         "prompts": prompts.active_versions(),   # T3-4：当前生效的 prompt 版本，一眼可见
     }
 
@@ -298,6 +319,72 @@ async def assist(req: AssistRequest, request: Request):
         s["attrs"]["mode"] = result.get("mode")
         s["attrs"]["degraded"] = "error" in result
     return attach_obs(result)
+
+
+class HandleRequest(BaseModel):
+    incident: dict[str, Any]
+    domain: str = "ssrm"
+
+
+class ResolveRequest(BaseModel):
+    approved_class: str
+    note: str = ""
+
+
+@app.post("/handle")
+async def handle(req: HandleRequest, request: Request):
+    """处置编排（T5）：分类 → 只读信息收集 → 确定性处置映射。
+
+    - auto_dispose：高置信 + 证据过门禁，按 suggested_action 自动处置
+    - human_review：低置信/证据拦截 → 中断快照落升级队列，等人工决议续跑
+    - escalate：unknown，无处置建议转人工兜底
+    """
+    pipeline = pipelines.get(req.domain)
+    if pipeline is None:
+        raise HTTPException(status_code=404, detail=f"领域 {req.domain!r} 未注册编排管线")
+    _check_rate(request)
+    budget = Budget(settings.request_budget_ms)
+    with span("handle", budget_ms=settings.request_budget_ms, domain=req.domain) as s:
+        result = await pipeline.run(req.incident, budget)
+        s["attrs"]["disposition"] = result.get("disposition")
+        s["attrs"]["steps"] = len(result.get("pipeline", []))
+    if result.get("disposition") == "human_review":
+        eid = escalations.add(req.domain, result)
+        result["escalation_id"] = eid
+        logger.info("升级队列新增待办",
+                    extra={"event": "escalation_created", "stage": "pipeline",
+                           "domain": req.domain, "reason": result.get("disposition_reason", "")[:100],
+                           "outcome": "ok"})
+    return attach_obs(result)
+
+
+@app.get("/escalations")
+async def list_escalations(status: str = "pending", limit: int = 20):
+    """升级队列：人工接管的待办清单（pending）或已决议记录（resolved）。"""
+    if status not in ("pending", "resolved"):
+        raise HTTPException(status_code=422, detail="status 只支持 pending / resolved")
+    return {"pending_count": escalations.pending_count(),
+            "items": escalations.list(status=status, limit=limit)}
+
+
+@app.post("/escalations/{escalation_id}/resolve")
+async def resolve_escalation(escalation_id: int, req: ResolveRequest, request: Request):
+    """人工决议：批准类别后从中断快照续跑 decide（不重新分类——人已裁决）。"""
+    _check_rate(request)
+    record = escalations.get(escalation_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"升级记录 {escalation_id} 不存在")
+    if record["status"] != "pending":
+        raise HTTPException(status_code=409, detail="该记录已决议（审计线索不可覆盖）")
+    pack = packs.get(record["domain"])
+    if pack is None or req.approved_class not in pack.classes:
+        raise HTTPException(status_code=422,
+                            detail=f"approved_class 必须是 {record['domain']} 域的合法类别: {list(pack.classes) if pack else '域不存在'}")
+    pipeline = pipelines[record["domain"]]
+    result = pipeline.resume(record["state"], req.approved_class, req.note)
+    escalations.resolve(escalation_id, f"{req.approved_class}（{req.note or '无备注'}）")
+    result["escalation_id"] = escalation_id
+    return result
 
 
 @app.get("/tools")

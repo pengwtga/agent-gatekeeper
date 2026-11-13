@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     # A/B 或紧急回滚：{"root_cause": "v1"} 覆盖 index.json 的 active 指针，不改仓库文件
     prompts_active: dict[str, str] = {}
 
+    # 处置编排（T5）：human_review 中断快照的 SQLite 落库路径（相对仓库根）
+    escalation_db: str = "data/escalations.db"
+
     # 服务
     api_port: int = 8001
 
