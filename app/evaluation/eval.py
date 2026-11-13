@@ -22,8 +22,8 @@ from app.agents.classifier import RootCauseClassifier
 from app.config import settings
 from app.core.llm_client import llm_client
 from app.domains import DomainPack
-from app.domains.csa import pack as csa_pack
 from app.domains.credit import pack as credit_pack
+from app.domains.csa import pack as csa_pack
 from app.domains.ssrm import pack as ssrm_pack
 from app.evaluation.dataset import load_dataset
 from app.prompts import record_score

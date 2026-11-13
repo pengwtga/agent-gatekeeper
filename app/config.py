@@ -3,8 +3,9 @@
 多 LLM Provider 容灾链：primary(deepseek/任意兼容) → zhipu(免费 glm-4-flash) → siliconflow(免费 Qwen) → 规则基线
 """
 
-from pydantic_settings import BaseSettings
 from typing import Optional
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):

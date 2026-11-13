@@ -28,11 +28,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from app.core.llm_client import llm_client
 from app.agents.rag_assistant import RagAssistant
+from app.core.llm_client import llm_client
 from app.domains import AssistantSpec
-from app.domains.csa import pack as csa_pack
 from app.domains.credit import pack as credit_pack
+from app.domains.csa import pack as csa_pack
 from app.domains.ssrm import pack as ssrm_pack
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"  # app/evaluation/ → 项目根

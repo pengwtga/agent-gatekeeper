@@ -21,13 +21,13 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from app.core.budget import Budget
 from app.config import settings
+from app.core.budget import Budget
 from app.core.embeddings import EmbeddingClient
 from app.core.llm_client import LLMClient
+from app.core.vector_store import InMemoryVectorStore
 from app.domains import AssistantSpec
 from app.observability.tracing import span
-from app.core.vector_store import InMemoryVectorStore
 from app.prompts import load as load_prompt
 
 logger = logging.getLogger(__name__)

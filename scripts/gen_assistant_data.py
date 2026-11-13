@@ -27,7 +27,7 @@ DATA = Path(__file__).resolve().parents[1] / "data"
 
 
 def load(path: Path) -> list[dict]:
-    return [json.loads(l) for l in path.open(encoding="utf-8") if l.strip()]
+    return [json.loads(line) for line in path.open(encoding="utf-8") if line.strip()]
 
 
 def save(path: Path, rows: list[dict]) -> None:

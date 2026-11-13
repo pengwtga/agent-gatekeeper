@@ -8,9 +8,6 @@
 - POST /assist          值班助手问答
 - GET  /metrics         进程内指标快照（时序 + 请求流水）
 - GET  /traces/{id}     单次请求的链路
-
-旧版服务端渲染页面（/playground、/assistant）在 `app/pages_legacy.py`，
-线上由 React 前端接管，这里只是保留兜底，不再演进。
 """
 
 import asyncio
@@ -24,23 +21,22 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-from app.core.budget import Budget
-from app.core.builtin_tools import build_default_registry
-from app.core.escalation import EscalationStore
-from app.core.tools import choose_and_run
 from app import prompts
 from app.agents.classifier import RootCauseClassifier
 from app.agents.pipeline import HandlePipeline
+from app.agents.rag_assistant import RagAssistant
+from app.config import settings
+from app.core.budget import Budget
+from app.core.builtin_tools import build_default_registry
+from app.core.escalation import EscalationStore
+from app.core.llm_client import llm_client
+from app.core.tools import choose_and_run
 from app.domains.credit import pack as credit_pack
 from app.domains.csa import pack as csa_pack
 from app.domains.ssrm import pack as ssrm_pack
-from app.config import settings
 from app.evaluation.dataset import load_dataset, stats
-from app.core.llm_client import llm_client
 from app.observability.metrics import metrics
 from app.observability.obs import ObservabilityMiddleware, attach_obs, setup_logging
-from app.pages_legacy import router as legacy_pages
-from app.agents.rag_assistant import RagAssistant
 from app.observability.tracing import span, traces
 
 setup_logging()
@@ -105,8 +101,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="SSRM Ops Agent", version="0.1.0", lifespan=lifespan)
 # 最外层中间件：发 trace_id、计时、发结构化 access 事件
 app.add_middleware(ObservabilityMiddleware)
-# 旧版服务端渲染页面：只为直连后端时兜底，线上由 React 前端接管
-app.include_router(legacy_pages)
 
 
 # ── 公网防护：服务会消耗 LLM API 配额，加最小成本的防刷措施 ──
@@ -199,11 +193,7 @@ async def root():
             "GET /traces/{trace_id}": "单次请求的链路（各阶段耗时）",
             "GET /tools": "工具注册表清单",
             "POST /tools/ask": "工具调用 Agent：自然语言 → 选工具 → 校验执行（body: {\"question\": \"...\"}）",
-        },
-        "pages": {
-            "playground": "/playground",
-            "assistant": "/assistant",
-        },
+        }
     }
 
 

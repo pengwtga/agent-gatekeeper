@@ -94,7 +94,7 @@ def _row(i: int, cls: str, text: str, status: str) -> dict:
 
 
 def main() -> None:
-    rows = [r for r in (json.loads(l) for l in FILE.open(encoding="utf-8") if l.strip())
+    rows = [r for r in (json.loads(line) for line in FILE.open(encoding="utf-8") if line.strip())
             if r["incident"]["ticket_id"].startswith("CSA-")]
     generated = []
     i = 100

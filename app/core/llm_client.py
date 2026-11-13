@@ -26,8 +26,8 @@ from typing import Any, Optional
 
 import httpx
 
-from app.core.budget import MIN_TRY_MS, Budget
 from app.config import settings
+from app.core.budget import MIN_TRY_MS, Budget
 from app.observability.obs import add_request_usage
 from app.observability.tracing import span
 
@@ -329,7 +329,9 @@ class LLMClient:
 
     # ── 成本可见：token 计数（进程级，多 worker 需换 Prometheus 计数器）──
     def _record_usage(self, provider: Provider, usage: Optional[dict[str, Any]]) -> None:
-        from app.observability.metrics import metrics  # 延迟导入：metrics 不依赖 llm_client，但保持模块加载顺序简单
+        from app.observability.metrics import (
+            metrics,  # 延迟导入：metrics 不依赖 llm_client，但保持模块加载顺序简单
+        )
 
         self._usage["calls"] += 1
         if not usage:

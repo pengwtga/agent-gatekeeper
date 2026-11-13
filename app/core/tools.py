@@ -18,7 +18,7 @@
 
 import json as _json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
 from app.core.budget import Budget

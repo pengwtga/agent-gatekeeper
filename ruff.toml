@@ -1,0 +1,10 @@
+# ruff 配置（T6-3 CI 用）
+# 规则取向：只做「会出 bug 的」（E4/E7/E9/F）+ import 排序（I）。
+# 不开全量风格集——这个项目的风格成本已经花在 docstring 和注释上，机器风格不是重点。
+line-length = 110
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I"]
+# BLE001（blind except）：容灾链路刻意捕获宽异常后记日志降级（llm_client/rag_assistant/pipeline），
+# 这是设计决定不是疏漏，见 T5-00/T4 文档的降级链描述。
+ignore = ["BLE001"]

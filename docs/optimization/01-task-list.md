@@ -668,6 +668,11 @@ c["match_type"] = "keyword"     # 与 "vector" 区分
 
 ## T6 · 工程卫生（1 天）
 
+> **状态（2026-11-13）：全部完成。** T6-1 死代码删除（pages_legacy 下线，直连后端兜底取消，
+> 前端 SPA 是唯一 UI）；T6-2 44 个单测（`pytest -q`，纯函数优先不烧 token）；
+> T6-3 GitHub Actions（ruff + pytest，规则取向见 `ruff.toml`）；T6-4 三处简历/README
+> 表述逐条核验，全部与代码对齐（详见 `T6-02-tests-and-ci.md`）；T6-5、T6-6 此前已完成。
+
 ### T6-1 删 300 行死代码（1 小时，**部分完成**：已抽出，未删除）
 
 > 现状：340 行页面代码已抽到 `app/pages_legacy.py`，`main.py` 593 → 273 行。
