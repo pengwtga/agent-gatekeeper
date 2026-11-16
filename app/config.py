@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     metrics_window_seconds: int = 900  # 延迟分位数/成功率的滑动窗口（15 分钟）
     metrics_max_samples: int = 2000  # 窗口内最多保留的延迟样本数（防内存增长）
 
+    # Trace 落库（T2-05）：内存只留最近 100 条热缓存，落库后才能跨重启/跨天回查。
+    # 单实例用 SQLite(WAL)；多实例时换成 Postgres，TraceStore 的方法签名不变。
+    trace_persist: bool = True
+    trace_db: str = "data/traces.db"
+    trace_retention_days: int = 7  # 保留期：每天约 2MB，7 天约 14MB
+
     # 公网防护：/eval 一次请求会循环调用 LLM 30 次，需要 token 防刷（留空则 /eval 直接拒绝）
     eval_token: str = ""
 

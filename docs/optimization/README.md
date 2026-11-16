@@ -22,6 +22,7 @@
 | [`T2-02-json-logs.md`](T2-02-json-logs.md) | 结构化 JSON 日志（事件即表名） |
 | [`T2-03-metrics.md`](T2-03-metrics.md) | 五个指标与滑动窗口分位数 |
 | [`T2-04-cost-attribution.md`](T2-04-cost-attribution.md) | 请求级 token 归因 |
+| [`T2-05-trace-persist.md`](T2-05-trace-persist.md) | Trace 落库（SQLite WAL，重启后可查 + 按时间/时长/状态检索） |
 | [`T2-06-observability-dashboard.md`](T2-06-observability-dashboard.md) | 可观测面板（分钟级趋势 + 请求流水） |
 | [`T3-00-rag-retrieval-eval.md`](T3-00-rag-retrieval-eval.md) | RAG 检索评测（Recall/MRR + 阈值扫描，T3 前置） |
 | [`T3-01-prompt-versioning.md`](T3-01-prompt-versioning.md) | Prompt 版本化（index + 启动校验 + 结果留痕）+ 20 条回归集 + `make eval` |

@@ -11,6 +11,8 @@ __pycache__/
 data/kb_vectors*.json
 data/escalations.db
 data/escalations.db-*
+data/traces.db
+data/traces.db-*
 
 # 前端
 frontend/node_modules/
@@ -24,3 +26,5 @@ frontend/vite.config.js.timestamp-*
 
 # macOS
 .DS_Store
+.pytest_tmp/
+.pytest_data/

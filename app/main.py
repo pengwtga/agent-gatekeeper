@@ -37,6 +37,7 @@ from app.domains.ssrm import pack as ssrm_pack
 from app.evaluation.dataset import load_dataset, stats
 from app.observability.metrics import metrics
 from app.observability.obs import ObservabilityMiddleware, attach_obs, setup_logging
+from app.observability.trace_store import get_trace_store
 from app.observability.tracing import span, traces
 
 setup_logging()
@@ -393,16 +394,42 @@ async def tools_ask(req: ToolAskRequest, request: Request):
         )
 
 
+@app.get("/traces")
+async def list_traces(
+    limit: int = 20,
+    path: Optional[str] = None,
+    min_duration_ms: Optional[float] = None,
+    only_errors: bool = False,
+    since_minutes: Optional[int] = None,
+):
+    """按时间倒序列出历史链路（精简行，不含 spans）。
+
+    这是「列表 → 详情」分层的列表侧：一页 20 行只带元数据，点进去再取瀑布图。
+    数据来自 SQLite（T2-05），所以能查到重启前、滚出内存 100 条窗口之外的请求。
+    """
+    rows = get_trace_store().list(
+        limit=max(1, min(200, limit)),
+        path=path,
+        min_duration_ms=min_duration_ms,
+        only_errors=only_errors,
+        since_minutes=since_minutes,
+    )
+    return {"count": len(rows), "traces": rows}
+
+
 @app.get("/traces/{trace_id}")
 async def get_trace(trace_id: str):
     """按 trace_id 取单次请求的链路（各阶段耗时）。
 
-    只保留最近 100 条：这里不是追踪系统，是「刚才那条慢请求到底慢在哪」的现场取证。
-    真要做跨天检索得上 OTel + 后端存储，那是 T7 之后的事。
+    两级读：内存热缓存（最近 100 条，亚毫秒）→ SQLite 冷存（T2-05，可跨重启/跨天）。
+    内存优先是因为值班最常查「刚发生的那条」，而两边写入同源、结构同构，不存在不一致。
     """
-    record = traces.get(trace_id)
+    record = traces.get(trace_id) or get_trace_store().get(trace_id)
     if record is None:
-        raise HTTPException(status_code=404, detail="链路已滚出窗口（只保留最近 100 条）或 trace_id 不存在")
+        raise HTTPException(
+            status_code=404,
+            detail="trace_id 不存在，或已超过保留期（默认 7 天，见 trace_retention_days）",
+        )
     return record
 
 

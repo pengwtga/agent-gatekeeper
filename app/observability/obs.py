@@ -11,6 +11,7 @@ Agent 的调用链是 路由 → 分类器 → LLM 客户端 → httpx，中间�
 任务上下文隔离，天然是「当前请求作用域」，并发请求之间不会串。
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -20,6 +21,7 @@ from contextvars import ContextVar
 from typing import Any, Optional
 
 from app.config import settings
+from app.observability.trace_store import get_trace_store
 from app.observability.tracing import begin_spans, collect_spans, traces
 
 # ── 上下文变量 ──
@@ -220,7 +222,8 @@ class ObservabilityMiddleware:
             # （最典型：点开一条链路，列表第一条变成「查这条链路的那次请求」）
             counted = not (
                 path in ("/health", "/metrics", "/stats", "/kb/stats")
-                or path.startswith("/traces/")
+                # "/traces" 同时覆盖详情与列表：看流量的请求不该混进流水/落库
+                or path == "/traces" or path.startswith("/traces/")
             )
             outcome = "error" if error is not None else (
                 "ok" if status < 400 else ("client_error" if status < 500 else "server_error")
@@ -239,9 +242,11 @@ class ObservabilityMiddleware:
             # 瀑布图上业务阶段会全挤在右侧一小条，看着像画错了。
             child_spans = collect_spans()
             if counted and child_spans:
-                traces.put(tid, {
+                record = {
                     "trace_id": tid,
                     "ts": time.strftime("%H:%M:%S", time.localtime()),
+                    # 内存版用 "HH:MM:SS" 展示；落库要能跨天排序与算保留期，所以另存 epoch
+                    "ts_epoch": time.time(),
                     "method": method, "path": path, "status": status,
                     "duration_ms": duration_ms, "outcome": outcome,
                     "usage": usage,
@@ -254,7 +259,24 @@ class ObservabilityMiddleware:
                         "depth": 0, "parent": None,
                         "attrs": {"method": method, "path": path, "status": status},
                     }] + child_spans,
-                })
+                }
+                traces.put(tid, record)
+                # 落库走线程池：SQLite 写 + commit 约 1~3ms，且持连接锁，
+                # 直接在事件循环里做会拖慢并发请求。观测是旁路——写失败只记日志，
+                # 绝不能让 200 变 500（可观测系统的第一原则）。
+                if settings.trace_persist:
+                    try:
+                        await asyncio.to_thread(get_trace_store().put, record)
+                    except Exception as e:
+                        logger = logging.getLogger("app.trace_store")
+                        logger.warning(
+                            "trace 落库失败（不影响主请求）",
+                            extra={
+                                "event": "trace_persist_fail", "stage": "storage",
+                                "reason": f"{type(e).__name__}: {str(e)[:180]}",
+                                "outcome": "fail",
+                            },
+                        )
             logger = logging.getLogger("app.access")
             logger.info(
                 "%s %s -> %s", method, path, status,
