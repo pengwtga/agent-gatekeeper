@@ -6,9 +6,10 @@ trace_id 有了（T2-1）之后，能回答「这一次请求的日志在哪」�
 
 设计上刻意做小：
 
-1. **不引 OpenTelemetry**。OTel 要 collector、要 exporter、要 span 上下文传播规范，
+1. **不引 OpenTelemetry SDK**。OTel 要 collector、要 exporter、要 span 上下文传播规范，
    一个人维护的单实例服务付不起这个成本。这里只要能画出「本进程内一次请求的阶段耗时」。
-   真要接 OTel 时，`span()` 的调用点是现成的（换实现即可，业务代码不用动）。
+   T2-07 补上了协议出口：`otel.py` 把这里的扁平 span 列表转成 OTLP/JSON 推给 collector，
+   入站/出站走 W3C `traceparent`。**对接点是协议而不是库**，所以将来换 SDK 只换实现。
 
 2. **只收当前请求的 span**，用 contextvar 而不是参数透传。理由同 T2-1：
    调用链是 路由 → 分类器 → LLM 客户端 → httpx，逐层加参数会漏。
@@ -27,6 +28,7 @@ trace_id 有了（T2-1）之后，能回答「这一次请求的日志在哪」�
 """
 
 import time
+import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -87,6 +89,11 @@ def span(name: str, **attrs: Any):
         # depth 决定瀑布图的缩进与排序，parent 便于排查「这个 span 属于谁」
         "depth": (parent["depth"] + 1) if parent else 0,
         "parent": parent["name"] if parent else None,
+        # span_id / parent_span_id 是给 OTel 导出用的（T2-07）：OTLP 的父子关系
+        # 靠 ID 不靠名字，而一次请求里两个 llm.try 的父都叫 rag.answer，用名字无法唯一定位。
+        # 纯增量字段：前端与 SQLite 不使用，不影响既有行为。
+        "span_id": uuid.uuid4().hex[:16],
+        "parent_span_id": parent.get("span_id") if parent else None,
         "attrs": {k: v for k, v in attrs.items() if v is not None},
     }
     token = _current_span.set(record)

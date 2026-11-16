@@ -21,6 +21,15 @@ from contextvars import ContextVar
 from typing import Any, Optional
 
 from app.config import settings
+from app.observability.otel import (
+    export_trace,
+    format_traceparent,
+    is_sampled_out,
+    new_span_id,
+    normalize_trace_id,
+    parse_traceparent,
+    to_local_trace_id,
+)
 from app.observability.trace_store import get_trace_store
 from app.observability.tracing import begin_spans, collect_spans, traces
 
@@ -47,14 +56,19 @@ def current_trace_id() -> str:
     return _trace_id.get()
 
 
-def pick_trace_id(incoming: Optional[str]) -> str:
-    """复用上游传来的 trace_id（便于跨服务串联），非法或缺失则新建。
+def pick_trace_id(incoming: Optional[str], tp_ctx: Optional[dict[str, Any]] = None) -> str:
+    """复用上游 trace_id（便于跨服务串联），非法或缺失则新建。
 
     不信任任意长度的外部输入：超长/带换行的 header 直接进日志会污染日志行，
     进响应头更是 header 注入。所以只接受白名单字符且长度受限。
+
+    优先级：自家 `x-trace-id` > W3C `traceparent`（T2-07）> 新建。
+    前者优先是因为它就是我们自己的格式，不用做长度换算。
     """
     if incoming and _TRACE_RE.match(incoming):
         return incoming
+    if tp_ctx:
+        return to_local_trace_id(tp_ctx["trace_id"])
     return new_trace_id()
 
 
@@ -184,10 +198,23 @@ class ObservabilityMiddleware:
         from app.observability.metrics import metrics
 
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
-        tid = pick_trace_id(headers.get("x-trace-id") or headers.get("x-request-id"))
+        tp_ctx = parse_traceparent(headers.get("traceparent"))
+        tid = pick_trace_id(
+            headers.get("x-trace-id") or headers.get("x-request-id"), tp_ctx
+        )
+        # 与外部对齐的 32 位 id：上游给的原始值，或由本地 id 补零得来。
+        # 本地 tid 是 16 位（人看的短号），拿它反推 traceparent 会得到另一个值，链路就断了，
+        # 所以这两个 id 必须分开存：tid 用于日志/DB/前端，otel_tid 用于导出与响应头。
+        otel_tid = (tp_ctx or {}).get("trace_id") or normalize_trace_id(tid)
         token = set_trace_id(tid)
         begin_request_usage()
         begin_spans()
+
+        # 根 span 的 ID 在入口就生成：响应头要在 http.response.start 时就写上
+        # traceparent（晚于这个时机就拿不到 header 了），而落库的 record 里
+        # 根 span 必须用同一个 ID，否则导出时父子对不上。
+        root_span_id = new_span_id()
+        sampled = not (settings.otel_enabled and is_sampled_out(otel_tid, settings.otel_sample_ratio))
 
         path = scope.get("path", "-")
         method = scope.get("method", "-")
@@ -200,6 +227,8 @@ class ObservabilityMiddleware:
                 status = message["status"]
                 raw = list(message.get("headers") or [])
                 raw.append((b"x-trace-id", tid.encode()))
+                # T2-07：回写 W3C traceparent，下游（或前端 RUM）能继续串成一条链
+                raw.append((b"traceparent", format_traceparent(otel_tid, root_span_id, sampled).encode()))
                 message["headers"] = raw
             await send(message)
 
@@ -221,7 +250,7 @@ class ObservabilityMiddleware:
             # 它们的共同点是只服务于观察动作，混进流水会把真实请求稀释掉
             # （最典型：点开一条链路，列表第一条变成「查这条链路的那次请求」）
             counted = not (
-                path in ("/health", "/metrics", "/stats", "/kb/stats")
+                path in ("/health", "/metrics", "/stats", "/kb/stats", "/otel/stats")
                 # "/traces" 同时覆盖详情与列表：看流量的请求不该混进流水/落库
                 or path == "/traces" or path.startswith("/traces/")
             )
@@ -244,6 +273,8 @@ class ObservabilityMiddleware:
             if counted and child_spans:
                 record = {
                     "trace_id": tid,
+                    # 32 位、与外部对齐的 id（导出与溯源用）；不落库，只跟着 record 走一程
+                    "otel_trace_id": otel_tid,
                     "ts": time.strftime("%H:%M:%S", time.localtime()),
                     # 内存版用 "HH:MM:SS" 展示；落库要能跨天排序与算保留期，所以另存 epoch
                     "ts_epoch": time.time(),
@@ -257,6 +288,7 @@ class ObservabilityMiddleware:
                         # depth/parent 要跟 tracing.span() 产出的字段保持一致，
                         # 否则前端拿 s.depth 会拿到 undefined
                         "depth": 0, "parent": None,
+                        "span_id": root_span_id, "parent_span_id": None,
                         "attrs": {"method": method, "path": path, "status": status},
                     }] + child_spans,
                 }
@@ -277,6 +309,9 @@ class ObservabilityMiddleware:
                                 "outcome": "fail",
                             },
                         )
+                # T2-07：同一条 record 再送一程到 OTLP（双写）。
+                # enqueue 只做入队，网络 IO 在后台 task 里；未启用时是空操作。
+                export_trace(record)
             logger = logging.getLogger("app.access")
             logger.info(
                 "%s %s -> %s", method, path, status,

@@ -76,7 +76,19 @@ class Settings(BaseSettings):
     # 单实例用 SQLite(WAL)；多实例时换成 Postgres，TraceStore 的方法签名不变。
     trace_persist: bool = True
     trace_db: str = "data/traces.db"
-    trace_retention_days: int = 7  # 保留期：每天约 2MB，7 天约 14MB
+    # 保留期按时间算（7 天），清理按写入次数摊薄（每 500 次写清一次），见 trace_store.py
+    trace_retention_days: int = 7  # 约 0.8KB/条 × 1000 条/天 × 7 天 ≈ 5.6MB
+
+    # OTel 协议出口（T2-07）：默认关闭，因为本地通常没有 collector。
+    # 打开后按 OTLP/HTTP + JSON 把 span 推到 endpoint（collector 标准端口 4318）。
+    otel_enabled: bool = False
+    otel_endpoint: str = "http://127.0.0.1:4318"
+    otel_service_name: str = "ssrm-aiops"
+    otel_timeout_ms: int = 3000
+    otel_batch_size: int = 32
+    otel_flush_interval_ms: int = 5000
+    otel_queue_max: int = 2000  # 有界队列：collector 挂掉时丢最老的，不把内存吃干
+    otel_sample_ratio: float = 1.0  # 按 trace_id 哈希采样（同一条 trace 同采同丢）
 
     # 公网防护：/eval 一次请求会循环调用 LLM 30 次，需要 token 防刷（留空则 /eval 直接拒绝）
     eval_token: str = ""

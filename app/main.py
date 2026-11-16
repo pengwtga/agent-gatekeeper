@@ -37,6 +37,7 @@ from app.domains.ssrm import pack as ssrm_pack
 from app.evaluation.dataset import load_dataset, stats
 from app.observability.metrics import metrics
 from app.observability.obs import ObservabilityMiddleware, attach_obs, setup_logging
+from app.observability.otel import otel_stats, start_otel, stop_otel
 from app.observability.trace_store import get_trace_store
 from app.observability.tracing import span, traces
 
@@ -90,8 +91,11 @@ async def lifespan(app: FastAPI):
             assistant.degrade_to_keyword(f"warmup_timeout>{settings.warmup_timeout_seconds}s")
         logger.info("助手就绪", extra={"event": "rag_ready", "stage": "boot",
                                       "domain": name, "reason": assistant.mode, "outcome": "ok"})
+    # OTel 协议出口（T2-07）：默认关闭；collector 不可达不影响启动（后台 task 里失败只记账）
+    await start_otel()
     yield
     # 优雅退出：先关连接池再让进程退出，避免悬挂连接拖慢 shutdown
+    await stop_otel()
     await llm_client.aclose()
     for assistant in assistants.values():
         await assistant.aclose()
@@ -286,6 +290,16 @@ async def eval_endpoint(req: EvalRequest, request: Request):
 @app.get("/stats")
 async def dataset_stats():
     return stats()
+
+
+@app.get("/otel/stats")
+async def otlp_stats():
+    """OTLP 导出健康度：队列深度、成功 span 数、失败批次数、丢弃数。
+
+    接入类工作最容易犯的错是「配了但没通，谁也不知道」——有个能一眼看出来的
+    端点，比在日志里 grep otlp_export_fail 快得多。
+    """
+    return otel_stats()
 
 
 class AssistRequest(BaseModel):

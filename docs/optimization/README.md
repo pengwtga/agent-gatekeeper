@@ -24,6 +24,7 @@
 | [`T2-04-cost-attribution.md`](T2-04-cost-attribution.md) | 请求级 token 归因 |
 | [`T2-05-trace-persist.md`](T2-05-trace-persist.md) | Trace 落库（SQLite WAL，重启后可查 + 按时间/时长/状态检索） |
 | [`T2-06-observability-dashboard.md`](T2-06-observability-dashboard.md) | 可观测面板（分钟级趋势 + 请求流水） |
+| [`T2-07-otlp-export.md`](T2-07-otlp-export.md) | OTel 协议出口（W3C traceparent 传播 + OTLP/HTTP JSON 导出 + gen_ai 语义约定） |
 | [`T3-00-rag-retrieval-eval.md`](T3-00-rag-retrieval-eval.md) | RAG 检索评测（Recall/MRR + 阈值扫描，T3 前置） |
 | [`T3-01-prompt-versioning.md`](T3-01-prompt-versioning.md) | Prompt 版本化（index + 启动校验 + 结果留痕）+ 20 条回归集 + `make eval` |
 | [`T3-02-evidence-refs.md`](T3-02-evidence-refs.md) | 证据判据换结构化引用（消除分数反转），v1/v2 回归对比 + 标定脚本 |
