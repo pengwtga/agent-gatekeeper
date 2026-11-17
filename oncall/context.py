@@ -60,12 +60,19 @@ def build_messages(
     facts: Sequence[dict],
     steps: Sequence[ToolCallRecord],
     tool_specs: Sequence[dict],
+    memory_block: str = "",
 ) -> tuple[str, str]:
     """返回 (system, user)。为什么不拼成一个字符串：v1 的 chat_json 就是双参数接口，
-    且 system 稳定才有前缀缓存可吃。"""
+    且 system 稳定才有前缀缓存可吃。
+
+    memory_block（F15）：事故记忆段，插在事实之后、步骤之前——它回答「以前怎么解决的」，
+    地位低于本次工具取回的事实（标注了「不得作为证据引用」）。
+    """
+    memory_section = f"## 历史同类\n{memory_block}\n\n" if memory_block else ""
     payload = (
         f"## 任务\n{goal}\n\n"
         f"## 已确认事实\n{_facts_block(facts)}\n\n"
+        f"{memory_section}"
         f"## 最近步骤\n{_steps_block(steps)}\n\n"
         f"## 工具清单\n{json.dumps(list(tool_specs), ensure_ascii=False)}\n"
     )

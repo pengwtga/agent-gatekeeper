@@ -84,8 +84,8 @@ tests/test_architecture.py        # 依赖方向守卫
 |---|---|---|---|
 | I1 | F01 F02 F03 | `oncall ask "XF-885 注册卡单"` 出带证据结论 | 10 条单跳 pass@1 ≥【待实测】；平均步数 ≤ 6 |
 | I2 ✅ | F04 F05 F06 F07 | 写操作挂起落库，`oncall approve` 后续跑；`oncall resume` 断点续跑 | 危险动作审批前执行 **0 次**（单测断言）；同审批重复执行 handler 仅 1 次（幂等键）；超时默认拒绝；destructive 双人确认；137 passed |
-| I3 ✅（F10/F11 未做） | F08 F09 F12 | `oncall serve` 被外部 client list+call 成功（子进程往返测试）；接两个同名 server 前缀不覆盖；多轮检索 `rag_search` 真模型 5 步跑通 | 外部 host list+call 成功（✅）；外部工具默认 WRITE、显式 trust 才降级（✅）；多跳集 pass 提升【待实测，I4 评测集】 |
-| I4 | F13 F14 F15 | 三组对照报告 + run 轨迹面板 | CI 门禁生效；报告含置信区间与失败案例 |
+| I3 ✅（F10/F11 未做） | F08 F09 F12 | `oncall serve` 被外部 client list+call 成功（子进程往返测试）；接两个同名 server 前缀不覆盖；多轮检索 `rag_search` 真模型 5 步跑通 | 外部 host list+call 成功（✅）；外部工具默认 WRITE、显式 trust 才降级（✅）；多跳集评测集已建（bench/dataset.py 30 条），真模型 nightly 待跑 |
+| I4 ✅（F13/F14/F15） | F13 F14 F15 | `python -m bench.run --arm all --report bench/report.md` 一条命令出报告；`oncall trace/runs` 轨迹视图；事故记忆注入「历史同类」段 | 判分/门禁/报告全链路通（lowfi 冒烟：B 100%、危险误执行 0、gate PASS）；**真模型 nightly 与 F15 §7.1 的重复事故步数下降待实测**；C 组 langgraph 未安装 → skipped（如实标注） |
 
 ---
 

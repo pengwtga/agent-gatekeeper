@@ -49,6 +49,8 @@ class Deps:
     observer: Optional[Callable[[str, dict], None]] = None
     # 持久化（F05/F06）：None = 不落库（I1 兼容）。审批与 resume 必须有它。
     store: Optional[RunStore] = None
+    # 事故记忆（F15）：None = 关闭。写入纪律在 _remember()，不在调用方。
+    memory: Any = None
 
 
 @dataclass
@@ -85,6 +87,12 @@ def new_run_id() -> str:
 async def run_incident(goal: str, *, deps: Deps, opts: Optional[RunOptions] = None) -> RunResult:
     opts = opts or RunOptions()
     run_id = new_run_id()
+    # F15：run 开始时召回「历史同类」装配进上下文（此时簇还不知道，按现象指纹匹配）。
+    # getattr 兼容鸭子类型的 Deps（测试用 SimpleNamespace 造依赖时可以不带 memory 字段）
+    memory = getattr(deps, "memory", None)
+    memory_block = ""
+    if memory is not None:
+        memory_block = memory.render_block(goal, domain=opts.domain)
     outcome = await run_loop(
         goal,
         llm=deps.llm,
@@ -97,16 +105,41 @@ async def run_incident(goal: str, *, deps: Deps, opts: Optional[RunOptions] = No
         min_confidence=opts.min_confidence,
         observer=deps.observer,
         store=deps.store,
+        memory_block=memory_block,
     )
     if deps.store is not None:
         _persist_status(deps.store, run_id, outcome)
+    _remember(memory, opts.domain, goal, run_id, outcome)
     return RunResult(run_id=run_id, goal=goal, outcome=outcome)
+
+
+def _remember(memory: Any, domain: str, goal: str, run_id: str, outcome: Outcome) -> None:
+    """事故记忆的写入闸门（F15 §3 纪律 1）：只写已验证的。
+
+    status=ok 意味着模型 finish 且过了传感器（S1/S2/S3）——这才是「经验」；
+    needs_human / failed / budget_exhausted 一律不写，未验证结论进记忆比没记忆更糟。
+    """
+    if memory is None:
+        return
+    if outcome.status != OK or outcome.root_cause_class in ("", "unknown"):
+        return
+    memory.record(
+        domain=domain,
+        cluster=outcome.root_cause_class,
+        fingerprint=goal,
+        conclusion=outcome.conclusion,
+        action=outcome.conclusion,  # v2 的结论 = 根因 + 建议动作一句话，先合写；拆字段留给 F04 扩展
+        outcome="ok",
+        run_id=run_id,
+    )
 
 
 def _persist_status(store: RunStore, run_id: str, outcome: Outcome) -> None:
     """run 状态的落库点统一放这里，loop 只管跑——状态机不要散在循环体里。"""
     status = "pending_approval" if outcome.pending_approval else outcome.status
-    store.set_status(run_id, status, conclusion=outcome.conclusion, reason=outcome.reason)
+    # usage 一并落库（F14）：token/步数是评测与面板的主指标，不能只活在内存里
+    store.set_status(run_id, status, conclusion=outcome.conclusion,
+                     reason=outcome.reason, usage=outcome.usage)
 
 
 def _pending_outcome(run: dict, approval: Optional[dict]) -> Outcome:
@@ -221,8 +254,11 @@ async def resume_incident(run_id: str, *, deps: Deps, opts: Optional[RunOptions]
         start_i=start_i,
         initial_facts=facts,
         initial_steps=steps,
+        memory_block=getattr(deps, "memory", None).render_block(run["goal"], domain=opts.domain)
+        if getattr(deps, "memory", None) is not None else "",
     )
     _persist_status(store, run_id, outcome)
+    _remember(getattr(deps, "memory", None), opts.domain, run["goal"], run_id, outcome)
     return RunResult(run_id=run_id, goal=run["goal"], outcome=outcome)
 
 

@@ -13,7 +13,13 @@ from app.core.tools import Tool, ToolRegistry
 
 
 class ScriptedLLM:
-    """按顺序吐出预设响应；脚本用完后重复最后一条（模拟模型卡在原地）。"""
+    """按顺序吐出预设响应；脚本用完后重复最后一条（模拟模型卡在原地）。
+
+    is_configured=True：被 v1 classifier 这类「先查属性再决定通道」的调用方
+    当成已配置的模型用，保证评测/测试走的是 LLM 通道而不是静默降级。
+    """
+
+    is_configured = True
 
     def __init__(self, script: list[dict]) -> None:
         if not script:

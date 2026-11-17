@@ -32,6 +32,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs(
   run_id TEXT PRIMARY KEY, goal TEXT DEFAULT '', status TEXT DEFAULT 'running',
   conclusion TEXT DEFAULT '', reason TEXT DEFAULT '',
+  usage_json TEXT DEFAULT '{}',
   created_at REAL, updated_at REAL);
 CREATE TABLE IF NOT EXISTS steps(
   run_id TEXT, i INTEGER, tool TEXT DEFAULT '', args_json TEXT DEFAULT '{}',
@@ -74,8 +75,17 @@ class RunStore:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=3000")
             conn.executescript(_SCHEMA)
+            self._migrate(conn)
             self._conn = conn
         return self._conn
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """旧库升级（F14）：runs 表补 usage_json 列。SQLite 的 ALTER 只能加列，够用。"""
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
+        if "usage_json" not in cols:
+            conn.execute("ALTER TABLE runs ADD COLUMN usage_json TEXT DEFAULT '{}'")
+            conn.commit()
 
     def init(self) -> "RunStore":
         self._db()
@@ -95,11 +105,13 @@ class RunStore:
         self._db().commit()
 
     def set_status(self, run_id: str, status: str, *, conclusion: str = "",
-                   reason: str = "") -> None:
+                   reason: str = "", usage: Optional[dict[str, Any]] = None) -> None:
         conn = self._db()
         conn.execute(
-            "UPDATE runs SET status=?, conclusion=?, reason=?, updated_at=? WHERE run_id=?",
-            (status, conclusion, reason, time.time(), run_id))
+            "UPDATE runs SET status=?, conclusion=?, reason=?, usage_json=?, updated_at=?"
+            " WHERE run_id=?",
+            (status, conclusion, reason,
+             json.dumps(usage or {}, ensure_ascii=False, default=str), time.time(), run_id))
         conn.commit()
 
     # ── checkpoint：steps + facts 一个事务（少一步就丢数据）──
@@ -123,7 +135,8 @@ class RunStore:
         """读回完整 run 状态（steps 连续无空洞由 checkpoint 的 PK(run_id,i) 保证）。"""
         conn = self._db()
         row = conn.execute(
-            "SELECT goal, status, conclusion FROM runs WHERE run_id=?", (run_id,)).fetchone()
+            "SELECT goal, status, conclusion, usage_json, created_at, updated_at"
+            " FROM runs WHERE run_id=?", (run_id,)).fetchone()
         if row is None:
             return None
         step_rows = conn.execute(
@@ -134,6 +147,8 @@ class RunStore:
             (run_id,)).fetchall()
         return {
             "run_id": run_id, "goal": row[0], "status": row[1], "conclusion": row[2],
+            "usage": json.loads(row[3] or "{}"),
+            "created_at": row[4], "updated_at": row[5],
             "steps": [ToolCallRecord(
                 i=r[0], tool=r[1], args=json.loads(r[2] or "{}"), ok=bool(r[3]),
                 error=r[4], ms=r[5], truncated=bool(r[6]), skipped=r[7]) for r in step_rows],
@@ -205,3 +220,29 @@ class RunStore:
             " VALUES(?,?,?,?)",
             (key, run_id, json.dumps(result, ensure_ascii=False, default=str), time.time()))
         conn.commit()
+
+    # ── 观测（F14）：审批等待单独取，不计入 agent 延迟 ──
+    def approval_waits(self, run_id: str) -> list[dict[str, Any]]:
+        """run 的每条审批的等待时长（秒）。pending 用当前时间算「已等待」。"""
+        rows = self._db().execute(
+            "SELECT status, created_at, decided_at FROM approvals"
+            " WHERE run_id=? ORDER BY created_at", (run_id,)).fetchall()
+        now = time.time()
+        return [{
+            "status": r[0],
+            "created_at": r[1],
+            "decided_at": r[2],
+            "wait_s": (r[2] or now) - r[1],
+        } for r in rows]
+
+    def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
+        """run 列表（F14 面板的最小数据面）：不含步骤详情。"""
+        rows = self._db().execute(
+            "SELECT r.run_id, r.goal, r.status, r.usage_json, r.created_at, r.updated_at,"
+            " (SELECT COUNT(*) FROM steps s WHERE s.run_id = r.run_id) AS n_steps"
+            " FROM runs r ORDER BY r.created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [{
+            "run_id": r[0], "goal": r[1], "status": r[2],
+            "usage": json.loads(r[3] or "{}"),
+            "created_at": r[4], "updated_at": r[5], "steps": r[6],
+        } for r in rows]

@@ -83,6 +83,7 @@ async def run_loop(
     start_i: int = 1,
     initial_facts: Optional[list[dict]] = None,
     initial_steps: Optional[list[ToolCallRecord]] = None,
+    memory_block: str = "",
 ) -> Outcome:
     """store 传入时每步落库（F06 checkpoint）；initial_* 由 resume 重建状态。
 
@@ -113,7 +114,8 @@ async def run_loop(
             return _wrap(BUDGET_EXHAUSTED, steps, facts, started, clock, tokens,
                          reason=_budget_reason(budget, budget_ms, i))
 
-        system, user = build_messages(goal, facts, steps, tool_specs)
+        system, user = build_messages(goal, facts, steps, tool_specs,
+                                      memory_block=memory_block)
         try:
             # RunBudget 与 v1 Budget 的接口同名（remaining_ms/slice/exhausted），
             # 直接传进去让 LLM 客户端把「剩余预算」当超时上界

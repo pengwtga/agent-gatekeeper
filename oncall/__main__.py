@@ -55,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     mcp.add_argument("--domain", default="ssrm", choices=("ssrm", "csa", "credit"))
     mcp.add_argument("--transport", default="stdio", choices=("stdio",))
 
+    trace = sub.add_parser("trace", help="查看一个 run 的步骤时间轴（F14 面板详情页的 CLI 版）")
+    trace.add_argument("run_id")
+
+    runs = sub.add_parser("runs", help="列出最近的 run（状态/步数/token，挂起的标 ⏳）")
+    runs.add_argument("--limit", type=int, default=20)
+
     return p
 
 
@@ -139,8 +145,34 @@ def main(argv: Optional[Sequence[str]] = None, deps_factory: DepsFactory = build
         return _serve(args)
     if args.cmd in ("resume", "approve"):
         return asyncio.run(_run_runcontrol(args, deps_factory))
+    if args.cmd in ("trace", "runs"):
+        return _observe(args)
 
     return asyncio.run(_run(args, deps_factory))
+
+
+def _observe(args: argparse.Namespace) -> int:
+    """F14 面板的 CLI 版：只读 store，不要求 LLM 配置（看轨迹不需要 Key）。"""
+    from oncall.deps import build_store
+    from oncall.observe import format_runs_table, format_trace
+
+    store = build_store()
+    try:
+        if args.cmd == "trace":
+            run = store.load_run(args.run_id)
+            if run is None:
+                print(f"run {args.run_id} 不存在（库：{store.path}）", file=sys.stderr)
+                return EXIT_UNIMPLEMENTED
+            print(format_trace(run, store))
+        else:
+            rows = store.list_runs(limit=args.limit)
+            if not rows:
+                print(f"库 {store.path} 里还没有 run")
+            else:
+                print(format_runs_table(rows, store))
+        return 0
+    finally:
+        store.close()
 
 
 def _serve(args: argparse.Namespace) -> int:

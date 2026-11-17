@@ -15,12 +15,21 @@ class ConfigError(RuntimeError):
 
 _DOMAIN_NAMES = ("ssrm", "csa", "credit")
 DEFAULT_DB_PATH = "data/oncall.sqlite3"
+DEFAULT_MEMORY_PATH = "data/incident_memory.sqlite3"
 
 
 def build_store() -> "RunStore":  # noqa: F821 —— 字符串注解避免顶部循环导入
     from oncall.store import RunStore
 
     return RunStore(os.environ.get("ONCALL_DB") or DEFAULT_DB_PATH).init()
+
+
+def build_memory():
+    """事故记忆（F15）。ONCALL_MEMORY 可覆盖路径；空串 = 显式关闭记忆。"""
+    from oncall.memory import IncidentMemory
+
+    path = os.environ.get("ONCALL_MEMORY", DEFAULT_MEMORY_PATH)
+    return None if path == "" else IncidentMemory(path)
 
 
 async def build_registry(domain: str = "ssrm", *, require_llm: bool = True):
@@ -66,4 +75,5 @@ async def build_default_deps(domain: str = "ssrm") -> Deps:
     from app.core.llm_client import llm_client
 
     registry = await build_registry(domain)
-    return Deps(llm=llm_client, registry=registry, store=build_store())
+    return Deps(llm=llm_client, registry=registry, store=build_store(),
+                memory=build_memory())
