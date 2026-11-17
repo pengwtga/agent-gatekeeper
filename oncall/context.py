@@ -1,12 +1,9 @@
-"""上下文装配（I1 最小版）。
+"""上下文装配（I2：压缩已实现）。
 
-I1 只做「六段里的四段」：角色规则 / 任务 / 已确认事实 / 最近步骤 + 工具契约。
-压缩（当上下文超预算时把早期步骤压成事实表）是 I2 的 F04，这里先留好接口：
-把 `steps` 换成「更短的步骤列表」，装配逻辑不用改。
-
-两条现在就必须守住的规则：
-1. **规则段永不参与压缩**（放在 system 里，不随步骤增长）
-2. **事实带 ref**：没有来源的「事实」等于让模型用自己编的东西推理
+压缩策略（F04 §3）：**摘要成事实，不留摘要成散文**——
+- 事实表（③ 段）全量保留且每条带 ref：它是压缩的产物，不是压缩的对象
+- 步骤原文只留最近 3 步，更早的从上下文移出（原文不删，full_ref 可回查 trace）
+- 规则段（system）钉在头部，永不参与压缩——规则被压掉，模型会直接调写工具
 """
 
 import json
@@ -47,6 +44,9 @@ def _facts_block(facts: Iterable[dict]) -> str:
 
 def _steps_block(steps: Sequence[ToolCallRecord]) -> str:
     rows = []
+    if len(steps) > MAX_RECENT_STEPS:
+        rows.append(f"- （更早 {len(steps) - MAX_RECENT_STEPS} 步已压缩："
+                    f"结论在「已确认事实」段，原文见 trace 的 full_ref）")
     for s in steps[-MAX_RECENT_STEPS:]:
         state = "ok" if s.ok else f"失败({s.error[:60]})"
         if s.skipped:

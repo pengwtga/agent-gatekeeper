@@ -79,17 +79,36 @@ async def run_loop(
     token_budget: Optional[int] = None,
     min_confidence: float = 0.7,
     observer: Optional[Callable[[str, dict], None]] = None,
+    store: Any = None,
+    start_i: int = 1,
+    initial_facts: Optional[list[dict]] = None,
+    initial_steps: Optional[list[ToolCallRecord]] = None,
 ) -> Outcome:
+    """store 传入时每步落库（F06 checkpoint）；initial_* 由 resume 重建状态。
+
+    resume 语义（F06 §5）：从 facts 重建上下文继续跑到新预算耗尽；
+    步号从 start_i 连续编号，steps 表 PK(run_id, i) 保证无空洞。
+    无进展检测的 seen 从已执行过的步骤重建——resume 后重复同样的查询照样拦。
+    """
     budget = RunBudget(budget_ms, clock, token_budget=token_budget)
     started = clock.now()
-    facts: list[dict] = []
-    steps: list[ToolCallRecord] = []
-    seen: set[str] = set()
+    facts: list[dict] = list(initial_facts or [])
+    steps: list[ToolCallRecord] = list(initial_steps or [])
+    seen: set[str] = {_fingerprint(s.tool, s.args) for s in steps if not s.skipped}
     repeats = 0
     tokens = {"prompt": 0, "completion": 0}
     tool_specs = specs_for_prompt(registry)
 
-    for i in range(1, max_steps + 1):
+    def _ckpt(record: ToolCallRecord) -> None:
+        """每步执行后、下一步装配前落库；崩溃最多丢一步。"""
+        steps.append(record)
+        if store is not None:
+            store.checkpoint(run_id, steps, facts)
+
+    if store is not None:
+        store.ensure_run(run_id, goal)
+
+    for i in range(start_i, start_i + max_steps):
         if budget.exhausted() or budget.token_exhausted():
             return _wrap(BUDGET_EXHAUSTED, steps, facts, started, clock, tokens,
                          reason=_budget_reason(budget, budget_ms, i))
@@ -129,7 +148,7 @@ async def run_loop(
         fp = _fingerprint(name, args)
         if fp in seen:
             repeats += 1
-            steps.append(ToolCallRecord(i=i, tool=name, args=args, skipped="repeat"))
+            _ckpt(ToolCallRecord(i=i, tool=name, args=args, skipped="repeat"))
             if repeats >= MAX_REPEATS:
                 return _wrap(NEEDS_HUMAN, steps, facts, started, clock, tokens,
                              reason=f"无进展：连续 {repeats + 1} 次调用 {name} 且参数相同")
@@ -142,19 +161,25 @@ async def run_loop(
                 # 白名单关：模型编造的工具名到此为止，但不终止——它可以改
                 record.skipped = "unknown_tool"
                 record.error = f"工具 {name} 不在注册表中"
-                steps.append(record)
+                _ckpt(record)
                 continue
 
             decision = decide(name, side_effect_of(name), _confidence(out.get("confidence")),
                               min_confidence=min_confidence)
             if decision.kind == APPROVAL:
                 record.skipped = "approval"
-                steps.append(record)
+                _ckpt(record)
+                approval_id = f"{run_id}:{i}"
+                if store is not None:
+                    # 状态落库不落内存（F05 §3）：人可能几小时后才批，进程不能挂着等
+                    store.record_approval(approval_id, run_id, name, args,
+                                          why=str(out.get("thought") or ""),
+                                          risk=decision.risk, requires=decision.requires)
                 return _wrap(
                     NEEDS_HUMAN, steps, facts, started, clock, tokens,
                     reason=decision.reason,
                     pending={
-                        "id": f"{run_id}:{i}", "run_id": run_id, "tool": name, "args": args,
+                        "id": approval_id, "run_id": run_id, "tool": name, "args": args,
                         "why": str(out.get("thought") or ""), "risk": decision.risk,
                         "requires": decision.requires,
                     },
@@ -162,15 +187,12 @@ async def run_loop(
             if decision.kind != ALLOW:
                 record.skipped = "denied"
                 record.error = decision.reason
-                steps.append(record)
+                _ckpt(record)
                 continue
 
             result = await call_tool(registry, name, args, full_ref=f"{run_id}#step:{i}")
             record.ok, record.error, record.ms = result.ok, result.error, result.ms
             record.truncated = result.truncated
-            steps.append(record)
-            if observer:
-                observer("tool", record.to_dict())
 
             if result.ok:
                 facts.append({
@@ -178,6 +200,10 @@ async def run_loop(
                     "value": _fact_text(result.value),
                     "ref": f"{run_id}#step:{i}",
                 })
+            # 先记事实再落 checkpoint：保证「step 记了但事实没记」不会发生
+            _ckpt(record)
+            if observer:
+                observer("tool", record.to_dict())
 
     return _wrap(BUDGET_EXHAUSTED, steps, facts, started, clock, tokens,
                  reason=f"步数用完（{max_steps} 步）")

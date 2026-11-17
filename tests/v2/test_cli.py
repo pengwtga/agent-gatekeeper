@@ -63,11 +63,9 @@ def test_text_output_is_human_readable(capsys):
 
 
 def test_unimplemented_subcommands_fail_loudly(capsys):
-    """I1 不做 resume/approve/serve：如实返回 4，不假装成功。"""
-    assert main(["resume", "r-1"]) == 4
-    assert main(["approve", "r-1", "--decision", "allow"]) == 4
+    """I2 起 resume/approve 已实现；serve 仍如实返回 4，不假装成功。"""
     assert main(["serve"]) == 4
-    assert "I2" in capsys.readouterr().err or "I3" in capsys.readouterr().err
+    assert "I3" in capsys.readouterr().err
 
 
 def test_missing_argument_is_a_usage_error():

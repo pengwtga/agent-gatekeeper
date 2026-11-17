@@ -28,3 +28,5 @@ frontend/vite.config.js.timestamp-*
 .DS_Store
 .pytest_tmp/
 .pytest_data/
+data/oncall.sqlite3
+data/oncall.sqlite3-*

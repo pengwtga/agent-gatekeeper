@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Awaitable, Callable, Optional, Sequence
 
-from oncall.api import Deps, RunOptions, exit_code, run_incident
+from oncall.api import Deps, RunOptions, approve_incident, exit_code, resume_incident, run_incident
 from oncall.deps import ConfigError, build_default_deps
 
 DepsFactory = Callable[[str], Awaitable[Deps]]
@@ -41,12 +41,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--incident", required=True)
     common(run)
 
-    resume = sub.add_parser("resume", help="从 checkpoint 续跑（I2）")
+    resume = sub.add_parser("resume", help="从 checkpoint 续跑（审批/预算/崩溃后）")
     resume.add_argument("run_id")
+    resume.add_argument("--json", action="store_true", help="输出结构化结果（给脚本/评测用）")
 
-    approve = sub.add_parser("approve", help="处理挂起的写操作（I2）")
+    approve = sub.add_parser("approve", help="处理挂起的写操作（allow/deny 后自动续跑）")
     approve.add_argument("run_id")
     approve.add_argument("--decision", choices=("allow", "deny"), required=True)
+    approve.add_argument("--by", default="cli", help="审批人标识，落库供审计")
+    approve.add_argument("--json", action="store_true", help="输出结构化结果（给脚本/评测用）")
 
     mcp = sub.add_parser("serve", help="作为 MCP server 被外部 host 调用（I3）")
     mcp.add_argument("--transport", default="stdio", choices=("stdio",))
@@ -73,6 +76,34 @@ def _render_text(result) -> str:
     if o.reason:
         lines.append(f"原因：{o.reason}")
     return "\n".join(lines)
+
+
+async def _run_runcontrol(args: argparse.Namespace, deps_factory: DepsFactory) -> int:
+    """resume / approve 的公共入口：装配依赖 → 调 api → 渲染 → 退出码。"""
+    try:
+        deps = await deps_factory("ssrm")
+    except ConfigError as exc:
+        print(f"配置错误：{exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    if deps.store is None:
+        print("resume/approve 需要持久化存储（ONCALL_DB，默认 data/oncall.sqlite3）",
+              file=sys.stderr)
+        return EXIT_CONFIG
+
+    try:
+        if args.cmd == "resume":
+            result = await resume_incident(args.run_id, deps=deps)
+        else:
+            result = await approve_incident(args.run_id, args.decision, deps=deps)
+    except RuntimeError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return EXIT_UNIMPLEMENTED
+
+    if getattr(args, "json", False):
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        print(_render_text(result))
+    return exit_code(result)
 
 
 async def _run(args: argparse.Namespace, deps_factory: DepsFactory) -> int:
@@ -103,10 +134,12 @@ async def _run(args: argparse.Namespace, deps_factory: DepsFactory) -> int:
 def main(argv: Optional[Sequence[str]] = None, deps_factory: DepsFactory = build_default_deps) -> int:
     args = build_parser().parse_args(argv)
 
-    if args.cmd in ("resume", "approve", "serve"):
-        # 如实报「未实现」，不假装成功：I2/I3 才落库审批与 MCP server
-        print(f"'{args.cmd}' 将在 I2/I3 实现（见 docs/v2/F05、F06、F09）", file=sys.stderr)
+    if args.cmd == "serve":
+        # 如实报「未实现」，不假装成功：I3 才做 MCP server
+        print("'serve' 将在 I3 实现（见 docs/v2/F09）", file=sys.stderr)
         return EXIT_UNIMPLEMENTED
+    if args.cmd in ("resume", "approve"):
+        return asyncio.run(_run_runcontrol(args, deps_factory))
 
     return asyncio.run(_run(args, deps_factory))
 

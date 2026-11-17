@@ -83,7 +83,7 @@ tests/test_architecture.py        # 依赖方向守卫
 | 迭代 | 内容 | 演示物 | 硬验收 |
 |---|---|---|---|
 | I1 | F01 F02 F03 | `oncall ask "XF-885 注册卡单"` 出带证据结论 | 10 条单跳 pass@1 ≥【待实测】；平均步数 ≤ 6 |
-| I2 | F04 F05 F06 F07 | 写操作挂起等审批；kill -9 后 resume 续跑 | 危险动作直接执行 **0/5**；resume 成功率 100% |
+| I2 ✅ | F04 F05 F06 F07 | 写操作挂起落库，`oncall approve` 后续跑；`oncall resume` 断点续跑 | 危险动作审批前执行 **0 次**（单测断言）；同审批重复执行 handler 仅 1 次（幂等键）；超时默认拒绝；destructive 双人确认；137 passed |
 | I3 | F08 F09 F10 F11 F12 | 接远程 MCP server；被外部 host 调用；多轮检索 | 外部 host list+call 成功；多跳集 pass 提升【待实测】 |
 | I4 | F13 F14 F15 | 三组对照报告 + run 轨迹面板 | CI 门禁生效；报告含置信区间与失败案例 |
 

@@ -1,6 +1,8 @@
 # F06 Checkpoint / resume
 
-迭代：I2 ｜ 依赖：F02 ｜ 代码：`oncall/checkpoint.py`
+迭代：I2 ✅ 已实现 ｜ 依赖：F02 ｜ 代码：`oncall/store.py` + `oncall/api.py`
+
+**实现状态（I2）**：五张表齐全（runs/steps/facts/approvals/applied_keys）；每步执行后一个事务落 steps+facts（`RunStore.checkpoint`，PK(run_id,i) 保证 steps 无空洞）；`resume_incident()` 三种断点（审批挂起/预算耗尽/已批待执行）都从存储重建状态，无进展检测的 seen 一并重建——resume 后重复同样的查询照样拦；**不自动 resume**，必须显式 `oncall resume`。已验证：resume 后不重查已确认事实、步号连续、审批过期默认拒绝、同审批重放 handler 仅 1 次。**未做**：7 天归档清理（表量小，暂无必要）。
 
 ## 1. 目标
 

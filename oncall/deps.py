@@ -4,6 +4,8 @@
 `main(argv, deps_factory=fake_factory)`。
 """
 
+import os
+
 from oncall.api import Deps
 
 
@@ -12,6 +14,13 @@ class ConfigError(RuntimeError):
 
 
 _DOMAIN_NAMES = ("ssrm", "csa", "credit")
+DEFAULT_DB_PATH = "data/oncall.sqlite3"
+
+
+def build_store() -> "RunStore":  # noqa: F821 —— 字符串注解避免顶部循环导入
+    from oncall.store import RunStore
+
+    return RunStore(os.environ.get("ONCALL_DB") or DEFAULT_DB_PATH).init()
 
 
 async def build_default_deps(domain: str = "ssrm") -> Deps:
@@ -37,4 +46,4 @@ async def build_default_deps(domain: str = "ssrm") -> Deps:
 
     rag = RagAssistant(llm_client, ssrm_pack.assistant)
     await rag.warmup()
-    return Deps(llm=llm_client, registry=build_default_registry(rag))
+    return Deps(llm=llm_client, registry=build_default_registry(rag), store=build_store())

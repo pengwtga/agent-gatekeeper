@@ -1,6 +1,8 @@
 # F05 权限网关与审批（HITL）
 
-迭代：I2 ｜ 依赖：F03 F06 ｜ 代码：`oncall/policy.py`
+迭代：I2 ✅ 已实现 ｜ 依赖：F03 F06 ｜ 代码：`oncall/policy.py` + `oncall/store.py` + `oncall/api.py`
+
+**实现状态（I2）**：审批落 SQLite（`approvals` 表，who/status/decided_at 留痕）；挂起即返回 exit 2；超时默认拒绝（`approval_timeout_s`，默认 2h，测试可设 0）；destructive 需 `requires=2` 双人确认（单人 approve 只记 1/2）；幂等键 `applied_keys` 拦住重复执行；CLI `oncall approve <run_id> --decision allow|deny [--by 审批人]`。状态机四条边各有单测（tests/v2/test_i2.py）。**未做**：exec_failed→failed 重试边、IM 审批通道（`ApprovalChannel` 抽象留给 I3+）。
 
 ## 1. 目标
 
