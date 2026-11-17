@@ -11,9 +11,9 @@
 
 from pathlib import Path
 
-from app.domains import AssistantSpec, DomainPack
+from app.domains import AssistantSpec, ConsistencyRule, DomainPack
 from app.domains.credit.rules import rule_baseline
-from app.domains.credit.taxonomy import CREDIT_CLASSES, FEW_SHOT, ROLE_INTRO
+from app.domains.credit.taxonomy import COLLECTION_STAGES, CREDIT_CLASSES, FEW_SHOT, ROLE_INTRO
 
 _DATA = Path(__file__).resolve().parents[3] / "data" / "credit"  # app/domains/credit/ → 项目根/data/credit
 
@@ -34,5 +34,11 @@ pack = DomainPack(
         id_field="case_id",
         class_field="category",
         role_intro="消费信贷催收团队的催员辅助助手。催收专员与债务人沟通前/中会来问你",
+        # 显式声明：助手类目用催收场景词表，不是分类器的进件风险词表。
+        # 不传的话 __post_init__ 会把 CREDIT_CLASSES 注进来，120 条立刻全部报类名非法——
+        # 「两套词表」这件事必须由领域说出来，不能让引擎去猜。
+        classes=COLLECTION_STAGES,
+        # 一个簇只属于一个类（合规红线的簇若被误标成普通提醒，话术约束会整个失效）
+        consistency=(ConsistencyRule("cluster_key", ("category",)),),
     ),
 )

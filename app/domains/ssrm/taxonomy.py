@@ -19,6 +19,18 @@ ROOT_CAUSE_CLASSES: dict[str, str] = {
     "frontend_param_error": "前端/参数错误：请求字段缺失、格式非法或前端调用方式错误。处置：拒绝请求并反馈具体字段问题，推动前端修复调用。",
 }
 
+# 知识库条目 standard_action 的唯一来源（T5-05）。
+# 手写的 30 条母本里，同一个类被写成了三种措辞（补齐 / 同步 / 更新回调配置，每类各 2 条），
+# 校验器上线当天抓出 40 行不一致——这正是「靠人肉约定」的实证。
+# 取占比最高的短标签做规范值：短标签给人看（KB 展示），长文本给模型看（上面定义里的「处置：」）。
+STANDARD_ACTIONS: dict[str, str] = {
+    "xflow_callback_lost": "主动拉取工单状态补齐",
+    "ea_sync_timeout": "异步任务退避重试",
+    "duplicate_submit": "幂等去重返回成功",
+    "data_inconsistency": "对账补推",
+    "frontend_param_error": "拒绝并反馈前端",
+}
+
 # few-shot 示例（固定 2 个，覆盖易混淆对）
 FEW_SHOT = [
     {

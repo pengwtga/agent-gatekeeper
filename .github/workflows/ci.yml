@@ -26,3 +26,7 @@ jobs:
 
       - name: 单测（pytest）
         run: pytest -q
+
+      # 知识库体检（T5-05）：启动期只跑 O(n) 结构层，O(n²) 的簇内自召回放在这里
+      - name: 知识库校验
+        run: python -m app.kb.validate --recall

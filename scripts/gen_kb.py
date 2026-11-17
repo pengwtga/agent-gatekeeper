@@ -7,7 +7,11 @@
 """
 
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.domains.ssrm.taxonomy import STANDARD_ACTIONS  # noqa: E402
 
 OUT = Path(__file__).parent.parent / "data" / "ssrm" / "kb_tickets.jsonl"
 
@@ -57,13 +61,16 @@ TICKETS = [
 
 def main():
     with OUT.open("w", encoding="utf-8") as f:
-        for i, (label, title, symptom, action, resolution) in enumerate(TICKETS):
+        for i, (label, title, symptom, _action, resolution) in enumerate(TICKETS):
             f.write(json.dumps({
                 "ticket_id": f"ONCALL-{i + 1:03d}",
                 "title": title,
                 "symptom": symptom,
                 "root_cause_class": label,
-                "standard_action": action,
+                # 动作不取上面元组里的字面量：唯一来源是分类体系的 STANDARD_ACTIONS（T5-05）。
+                # 手写这 30 条时同一个类被写成了 2~3 种措辞，校验器上线当天抓出 40 行不一致；
+                # 元组里保留原始记录只为对照，不再进入数据。
+                "standard_action": STANDARD_ACTIONS[label],
                 "resolution": resolution,
             }, ensure_ascii=False) + "\n")
     from collections import Counter

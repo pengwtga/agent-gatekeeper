@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from app.domains import AssistantSpec, DomainPack
+from app.domains import AssistantSpec, ConsistencyRule, DomainPack
 from app.domains.ssrm.rules import rule_baseline
 from app.domains.ssrm.taxonomy import FEW_SHOT, ROLE_INTRO, ROOT_CAUSE_CLASSES
 
@@ -25,5 +25,7 @@ pack = DomainPack(
         # 不填会退化成「你是智能助手」，约束只剩知识库文本，进不了 system prompt。
         role_intro="SSRM（供应商管理系统）值班团队的运维助手，"
                    "值班同学遇到注册/变更卡单、EA 同步失败、审批回调异常时会来问你",
+        # 一类一动作：同根因的条目如果动作不一致，说明有一条写错了（通常是新条目自己造句）
+        consistency=(ConsistencyRule("root_cause_class", ("standard_action",)),),
     )
 )

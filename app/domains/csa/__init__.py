@@ -10,7 +10,7 @@
 
 from pathlib import Path
 
-from app.domains import AssistantSpec, DomainPack
+from app.domains import AssistantSpec, ConsistencyRule, DomainPack
 from app.domains.csa.rules import rule_baseline
 from app.domains.csa.taxonomy import FEW_SHOT, ROLE_INTRO, TICKET_CLASSES
 
@@ -29,5 +29,7 @@ pack = DomainPack(
         id_field="case_id",
         class_field="category",
         role_intro="电商客服团队的坐席助手。客服坐席在接待用户咨询/投诉时会来问你",
+        # 一个簇只属于一个类：簇内 category 不一致，等于把同一现象拆到了两个类下
+        consistency=(ConsistencyRule("cluster_key", ("category",)),),
     ),
 )

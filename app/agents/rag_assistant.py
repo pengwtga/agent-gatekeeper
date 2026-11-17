@@ -25,8 +25,10 @@ from app.config import settings
 from app.core.budget import Budget
 from app.core.embeddings import EmbeddingClient
 from app.core.llm_client import LLMClient
+from app.core.text import bigrams
 from app.core.vector_store import InMemoryVectorStore
 from app.domains import AssistantSpec
+from app.kb.validate import load_kb
 from app.observability.tracing import span
 from app.prompts import load as load_prompt
 
@@ -61,7 +63,10 @@ class RagAssistant:
 
     # ── 知识库预热 ──
     async def warmup(self):
-        tickets = [json.loads(line) for line in self.spec.kb_file.open(encoding="utf-8") if line.strip()]
+        # 先校验再建索引（T5-05）：坏数据不该走到 embedding 那一步——
+        # 类名写错的条目会照常加载、照常召回，答案里出现一个分类字典里不存在的类名。
+        # 校验失败抛 KBValidationError，启动即失败（lifespan 只兜 TimeoutError，故意不吞）
+        tickets = load_kb(self.spec)
         self.docs = tickets
 
         # 向量缓存按知识库文件名隔离，避免多领域互相覆盖；
@@ -228,13 +233,17 @@ class RagAssistant:
         """
         return (h.get("score") or 0) >= threshold or (h.get("keyword_score") or 0) >= threshold
 
-    def _grams(self, text: str) -> frozenset[str]:
+    @staticmethod
+    def _grams(text: str) -> frozenset[str]:
         """字符 bigram 集合。比 unigram 强在「近重复区分」：
         KB 扩到 150 条后（同簇变体共享几乎全部单字），unigram 集合重叠率趋于相同，
         无法区分「 XF-885 」和「 XF-883 」；bigram 保留序列信息（-88/885/883），
-        区分度实测恢复（见 rag_eval 150 条规模评测）。"""
-        t = "".join(text.split())
-        return frozenset(t[i:i + 2] for i in range(len(t) - 1))
+        区分度实测恢复（见 rag_eval 150 条规模评测）。
+
+        实现在 app/core/text.py：知识库体检（app/kb/validate.py）要用同一口径，
+        两处各写一份，会出现「体检说能召回、线上召不回」的假绿。
+        """
+        return bigrams(text)
 
     def _keyword_search(self, question: str, top_k: int) -> list[dict[str, Any]]:
         # 文档 bigram 集合按知识库内容惰性缓存（docs 不变时只建一次）

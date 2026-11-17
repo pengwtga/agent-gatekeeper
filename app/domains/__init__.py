@@ -19,6 +19,22 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 
+@dataclass(frozen=True)
+class ConsistencyRule:
+    """分组一致性：同 group_by 值的条目，same 里的字段必须相同。
+
+    两种真实形态用同一条规则表达：
+    - ssrm：按 root_cause_class 分组，standard_action 必须一致（一类一动作）
+    - csa/credit：按 cluster_key 分组，category 必须一致（簇不跨类）
+
+    校验器只认识「分组字段 + 约束字段」，不认识业务含义——领域加一个簇维度时，
+    不需要改 app/kb/validate.py。
+    """
+
+    group_by: str
+    same: tuple[str, ...]
+
+
 @dataclass
 class AssistantSpec:
     """助手引擎（RAG）的领域知识规格。
@@ -38,6 +54,17 @@ class AssistantSpec:
     class_field: str = "root_cause_class"
     # system prompt 的领域背景段（催员辅助的合规边界、坐席助手的业务范围等）
     role_intro: str = ""
+    # ── 知识库入库校验（T5-05）──
+    # 类名枚举：默认由 DomainPack.__post_init__ 从 pack.classes 自动注入，领域作者不重复声明。
+    # 「分几类」的唯一权威是分类体系，KB 里的类名必须与它同源，否则检索答案会引用
+    # 一个分类字典里不存在的类名（实测过：ea_timeout 加载照过、召回照中）。
+    # 例外：助手类目与分类体系本来就是两套词表时（credit 进件风险 vs 催收场景），
+    # 领域显式传自己的枚举——「同源」是要求，但源不一定是分类词表。
+    classes: Optional[dict[str, str]] = None
+    # 除 id/class 之外必须存在的字段（三个域的 KB 都是 title/symptom/resolution）
+    required_fields: tuple[str, ...] = ("title", "symptom", "resolution")
+    # 分组一致性约束，见 ConsistencyRule
+    consistency: tuple[ConsistencyRule, ...] = ()
 
 
 @dataclass
@@ -61,3 +88,9 @@ class DomainPack:
     # 助手场景（RAG）：None 表示该领域暂无助手（只有分类）。
     # 有助手 = 该领域是完整的「分类 + 助手」双 Agent 结构（如 SSRM 运维、信贷催员辅助）
     assistant: Optional[AssistantSpec] = None
+
+    def __post_init__(self):
+        # 装配点：类名枚举只在 pack.classes 声明一次，注入给助手规格。
+        # 两处各抄一份枚举，正是「类名靠人肉对齐」的来源——抄漏一个值不会有任何报错。
+        if self.assistant is not None and self.assistant.classes is None:
+            self.assistant.classes = dict(self.classes)

@@ -40,6 +40,8 @@
 | [`T1-07-failover-retry-budget.md`](T1-07-failover-retry-budget.md) | 重试与容灾抢同一份预算：单家重试两次吃干 budget，备用 provider 从未被尝试 |
 | [`T3-03-evidence-field-dedup.md`](T3-03-evidence-field-dedup.md) | 证据下限按「不同字段」计数（同一句 error_message 切两段不再能凑满条数） |
 | [`T5-03-assistant-role-intro.md`](T5-03-assistant-role-intro.md) | 助手人设没进 prompt：默认值吃掉配置 + prompt v2 去首句冗余 |
+| [`T5-04-assistant-multi-turn.md`](T5-04-assistant-multi-turn.md) | 检索助手多轮对话方案（改写式 + 无状态 API，**未实现**，含预算账与降级梯子） |
+| [`T5-05-kb-schema-validation.md`](T5-05-kb-schema-validation.md) | 知识库入库校验：O(n) 结构层启动期炸 + O(n²) 召回层进 CI（上线当天抓到 160 行真问题） |
 
 ## 进度
 

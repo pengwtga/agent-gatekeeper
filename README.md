@@ -91,6 +91,7 @@
 - **采信阈值**：任一可信信号（余弦 / 字符覆盖率）低于阈值即提示人工判断，不硬答——三域阈值 0.4 / 0.3 / 0.2 不是拍的，是各自在检索评测集上扫描定标的（旧 ssrm 单域口径 0.55：0.5 起留存精度掉到 96%，0.55 起回到 100%，代价是 27% 查询转「建议人工」）
 - **检索评测**（`python -m app.evaluation.rag_eval [--domain csa|credit]`）：三域检索评测集共 230 条查询，**strict / cluster 双口径**（同现象簇即命中 vs 精确命中）。实测（关键词召回，bigram 打分）：ssrm 常规 strict 97.3% / 簇级 99.3%，csa 100%，credit 85%（R@3 95%）。扩容曾暴露 unigram 打分簇内区分崩塌（26%），换 bigram + 查询派生改进后恢复——完整调优链路见 T5-01。三域采信阈值各自扫描定标（0.4 / 0.3 / 0.2）
 - **检索规模 benchmark**（`python -m scripts.vector_bench`，`--pipeline` 测真实工单扩充）：余弦内核 1 万条 p50 0.91ms（对比 LLM 调用 p95 ≈ 4200ms 占比 <0.2%）；实测先到的瓶颈是纯 Python 关键词召回（1 万条 28ms）而非余弦——十万条级才需换结构，且第一刀优化是关键词扫描不是向量库
+- **知识库入库校验**（T5-05，`make kb-check`）：三域 370 条在启动期过 O(n) 结构层（必填/类型/类名枚举/ID 唯一/同组一致），不合格**拒绝启动**；O(n²) 的簇内自召回只进 CI。上线当天抓到 160 行真问题（ssrm 40 行同组动作措辞不一致、credit 120 行类目不在任何枚举内）
 - **可视化页面**：`/assistant` 聊天式问答、预设问题、置信度分级着色、相似工单表格、模式/通道徽标
 
 页面入口（左侧栏）：`/assistant`（值班助手）· `/playground`（根因分类）· `/observability`（可观测，含概览/流水/质量三个子页）
@@ -165,6 +166,7 @@ make eval      # 回归集（20 条手工，含证据探针）+ 困难集，分�
 make eval-rag  # 三域检索评测（调 LLM 重排）
 make calibrate # 证据判据标定（纯本地，不调 LLM）
 make prompts   # prompts/ 自检（active 指针 / 文件 / 占位符声明）
+make kb-check  # 知识库体检（结构 + 簇内自召回，纯本地不调 LLM，秒出）
 
 python -m app.evaluation.eval            # SSRM 分类常规集（LLM 通道）
 python -m app.evaluation.eval --regression --record  # 回归集，分数写入 prompts/scores.json
@@ -214,6 +216,8 @@ agent-gatekeeper/
 │   │   ├── ssrm/            # 供应商运维领域：taxonomy / rules / pack
 │   │   ├── csa/             # 电商客服领域（第二实例，证明可迁移）
 │   │   └── credit/          # 信贷域：进件风险分类（rule_first）+ 催员辅助知识库
+│   ├── kb/              # 知识库治理
+│   │   └── validate.py      # 入库校验（结构层启动期跑 / 召回层进 CI）+ CLI
 │   └── evaluation/      # 评测
 │       ├── dataset.py       # 数据集加载
 │       ├── eval.py          # 分类评测（python -m app.evaluation.eval，支持 --domain）
@@ -232,7 +236,8 @@ agent-gatekeeper/
 ├── prompts/           # prompt 模板（index.json 定 active 版本，启动校验，见「评测」一节）
 ├── docs/               # 架构图 + 页面截图 + 改造文档（optimization/）+ 设计决策（design-decisions.md）
 ├── scripts/            # 数据集生成脚本（固定种子可复现）
-├── Makefile            # make eval / eval-rag / prompts
+├── skills/             # 可分发技能（kb-entry：知识库入库五步流程）
+├── Makefile            # make eval / eval-rag / prompts / kb-check
 ├── .env.example
 └── requirements.txt
 ```
