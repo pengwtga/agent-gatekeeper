@@ -1147,6 +1147,31 @@ pre {
   margin: 10px 0 4px;
   flex-wrap: wrap;
 }
+/* 分段切换：实时（内存环形缓冲）/ 历史（SQLite）。用分段而不是下拉，
+   是为了让人一眼看出「屏幕上的数字来自哪一份数据」——两边的刷新语义完全不同 */
+.seg {
+  display: inline-flex;
+  border: 1px solid #dfe3ea;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #f7f8fa;
+}
+.segbtn {
+  border: none;
+  background: transparent;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: #5b6472;
+  cursor: pointer;
+}
+.segbtn + .segbtn {
+  border-left: 1px solid #dfe3ea;
+}
+.segbtn.on {
+  background: #2456e6;
+  color: #fff;
+}
 .filter-input {
   flex: 1;
   min-width: 180px;

@@ -36,3 +36,13 @@ export const fetchMetrics = () => request('/metrics')
 
 // 单次请求链路：各阶段 span 与耗时。查不到时后端返回 404（已滚出窗口）
 export const fetchTrace = (traceId) => request(`/traces/${encodeURIComponent(traceId)}`)
+
+// 历史链路列表：数据来自 SQLite（T2-05），能查到重启前、滚出内存 100 条窗口之外的请求
+export const fetchTraces = (params = {}) => {
+  const q = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') q.set(k, v)
+  })
+  const qs = q.toString()
+  return request(`/traces${qs ? `?${qs}` : ''}`)
+}
