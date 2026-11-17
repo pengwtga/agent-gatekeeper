@@ -37,6 +37,9 @@
 | [`T6-05-ui-shell-and-obs-split.md`](T6-05-ui-shell-and-obs-split.md) | 左侧栏外框 + 可观测拆三页（共享 metrics context） |
 | [`T6-06-app-package-layout.md`](T6-06-app-package-layout.md) | app/ 分包（15 个平铺文件 → core/agents/observability/evaluation） |
 | [`T7-02-trace-spans.md`](T7-02-trace-spans.md) | 请求链路（span 埋点 + 瀑布图，内存版） |
+| [`T1-07-failover-retry-budget.md`](T1-07-failover-retry-budget.md) | 重试与容灾抢同一份预算：单家重试两次吃干 budget，备用 provider 从未被尝试 |
+| [`T3-03-evidence-field-dedup.md`](T3-03-evidence-field-dedup.md) | 证据下限按「不同字段」计数（同一句 error_message 切两段不再能凑满条数） |
+| [`T5-03-assistant-role-intro.md`](T5-03-assistant-role-intro.md) | 助手人设没进 prompt：默认值吃掉配置 + prompt v2 去首句冗余 |
 
 ## 进度
 
