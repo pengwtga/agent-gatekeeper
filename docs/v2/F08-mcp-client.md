@@ -1,6 +1,13 @@
 # F08 MCP client（接远程工具）
 
-迭代：I3 ｜ 依赖：F03 F05 ｜ 代码：`oncall/mcp/client.py`
+迭代：I3 ✅ ｜ 依赖：F03 F05 ｜ 代码：`oncall/mcp/client.py`
+
+> **实现状态**：已落地。`McpClient`（stdio 子进程，initialize → tools/list →
+> tools/call，30s 超时）+ `merge_mcp_tools`（统一前缀 `mcp__<server>__<tool>`，
+> 启动失败记 degraded 返回不抛，坏 schema 跳过单工具不拖死整批）。**信任边界
+> 按设计实现**：客户端根本不读 annotations——外部工具一律不进 `SIDE_EFFECTS`，
+> fail-closed 兜底成 WRITE（要审批）；显式 `trust_server()` 才降级 READ。
+> 描述瘦身只留第一句（≤160 字）。两个同名 server 的前缀防覆盖有专门测试。
 
 ## 1. 目标
 

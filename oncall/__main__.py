@@ -51,7 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
     approve.add_argument("--by", default="cli", help="审批人标识，落库供审计")
     approve.add_argument("--json", action="store_true", help="输出结构化结果（给脚本/评测用）")
 
-    mcp = sub.add_parser("serve", help="作为 MCP server 被外部 host 调用（I3）")
+    mcp = sub.add_parser("serve", help="作为 MCP server 被外部 host 调用（只读工具，stdio）")
+    mcp.add_argument("--domain", default="ssrm", choices=("ssrm", "csa", "credit"))
     mcp.add_argument("--transport", default="stdio", choices=("stdio",))
 
     return p
@@ -135,13 +136,25 @@ def main(argv: Optional[Sequence[str]] = None, deps_factory: DepsFactory = build
     args = build_parser().parse_args(argv)
 
     if args.cmd == "serve":
-        # 如实报「未实现」，不假装成功：I3 才做 MCP server
-        print("'serve' 将在 I3 实现（见 docs/v2/F09）", file=sys.stderr)
-        return EXIT_UNIMPLEMENTED
+        return _serve(args)
     if args.cmd in ("resume", "approve"):
         return asyncio.run(_run_runcontrol(args, deps_factory))
 
     return asyncio.run(_run(args, deps_factory))
+
+
+def _serve(args: argparse.Namespace) -> int:
+    """F09：以 MCP server 身份常驻（stdio 行协议，由外部 host 拉起）。"""
+    from oncall.deps import build_serve_registry
+    from oncall.mcp.server import McpServer
+
+    try:
+        registry = asyncio.run(build_serve_registry(args.domain))
+    except ConfigError as exc:
+        print(f"配置错误：{exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    McpServer(registry, name=f"oncall-{args.domain}").serve_forever()
+    return 0
 
 
 if __name__ == "__main__":

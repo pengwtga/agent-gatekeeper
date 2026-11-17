@@ -1,6 +1,13 @@
 # F09 MCP server（把能力暴露出去）
 
-迭代：I3 ｜ 依赖：F03 ｜ 代码：`oncall/mcp/server.py`
+迭代：I3 ✅ ｜ 依赖：F03 ｜ 代码：`oncall/mcp/server.py`
+
+> **实现状态**：已落地。`python -m oncall serve` 起 stdio 行协议 server（协议版本
+> 2026-07-28 无状态修订版）；只暴露 `side_effect_of == READ` 的工具（kb_stats /
+> query_incidents / system_topology / rag_search）；`tools/call` 复用 harness 的
+> `call_tool`（schema 校验 + 截断 + 异常转可读 error），外部 host 与自家 agent
+> 看到同一份行为。错误走 `isError` 不走栈。协议循环可注入 lines/sink 进程内测试，
+> 外部 host 视角由 client↔server 子进程往返测试覆盖。
 
 ## 1. 目标
 

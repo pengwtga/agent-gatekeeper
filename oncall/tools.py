@@ -37,6 +37,7 @@ SIDE_EFFECTS: dict[str, SideEffect] = {
     "kb_stats": SideEffect.READ,
     "query_incidents": SideEffect.READ,
     "system_topology": SideEffect.READ,
+    "rag_search": SideEffect.READ,  # F12：只读检索（多轮改写在工具内部，不占主 loop 步数）
 }
 
 # 幂等声明：重放（resume）时，只有幂等的写操作可以直接重做

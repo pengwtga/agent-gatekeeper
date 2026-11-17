@@ -62,10 +62,10 @@ def test_text_output_is_human_readable(capsys):
     assert "结论：" in out
 
 
-def test_unimplemented_subcommands_fail_loudly(capsys):
-    """I2 起 resume/approve 已实现；serve 仍如实返回 4，不假装成功。"""
-    assert main(["serve"]) == 4
-    assert "I3" in capsys.readouterr().err
+def test_serve_rejects_domain_without_toolset(capsys):
+    """I3 起 serve 已实现（协议往返见 test_i3）；这里只验装配路径的失败面。"""
+    assert main(["serve", "--domain", "csa"]) == 4
+    assert "配置错误" in capsys.readouterr().err
 
 
 def test_missing_argument_is_a_usage_error():

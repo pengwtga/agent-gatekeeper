@@ -1,6 +1,14 @@
 # F12 Agentic RAG（检索助手升级）
 
-迭代：I3 ｜ 依赖：F02 F04 ｜ 代码：`oncall/rag_loop.py`（或并入 `app/agents/rag_assistant.py` 的新模式）
+迭代：I3 ✅ ｜ 依赖：F02 F04 ｜ 代码：`oncall/rag_loop.py`
+
+> **实现状态**：已落地，形态是**只读工具 `rag_search`**（多轮发生在工具内部，
+> 不占主 loop 步数）。循环 ≤3 轮、每轮切 8s 独立预算；enough() 与 v1 `_admitted`
+> 同口径（top1 过域阈值 + 覆盖 ≥2 个字段组，后者对当前全字段 KB 退化为「有命中」，
+> 是对稀疏 schema 的前向兼容——已在代码里诚实写明）；改写规则化不调 LLM
+> （删单号/日期噪声 → 用命中条目的标准措辞重问），两轮都不行返回 enough=false
+> **不硬答**。rewrites 落在返回值里（调优线索）。真模型冒烟：带单号问题 5 步
+> 出结论。多跳集 pass 提升等 I4 评测集。
 
 ## 1. 目标
 
