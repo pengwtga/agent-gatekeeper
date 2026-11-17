@@ -169,8 +169,15 @@ class RootCauseClassifier:
             result["evidence_literal_score"] = evidence_score(result["evidence"], incident)
 
             valid = sum(1 for d in detail if d["ok"])
-            if len(detail) < settings.min_evidence_refs:
-                reason = f"仅 {len(detail)} 条引用（下限 {settings.min_evidence_refs}）"
+            # 条数下限按「不同字段」算，不按条目算：`_value_matches` 对长文本允许引用为
+            # 原文子串（截断合理），于是一条 error_message 切成两段就能凑出 2 条 ok、
+            # refs_score 还是 1.0 —— 下限等于没设。按字段去重后，2 条才真的意味着
+            # 「两个独立事实都指向同一个结论」，这也是 T0-03 那个分数反转要防的东西。
+            valid_fields = {d["field"] for d in detail if d["ok"]}
+            result["evidence_refs_fields"] = len(valid_fields)
+            if len(valid_fields) < settings.min_evidence_refs:
+                reason = (f"仅 {len(valid_fields)} 个字段的有效引用"
+                          f"（下限 {settings.min_evidence_refs} 个不同字段）")
             elif score < settings.min_evidence_refs_score:
                 reason = f"有效引用 {valid}/{len(detail)}"
             else:

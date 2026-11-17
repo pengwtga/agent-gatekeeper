@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     # 为什么还要条数下限：只引 1 个正确字段就能拿 1.0 分，等于奖励「少说少错」，
     # 这正是 T0-03 里分数反转的根源（J 极简 1.000 > A 详述 0.684）。条数下限把这条路堵掉。
     min_evidence_refs_score: float = 0.7  # 标定见 docs/optimization/T3-02：诚实样本 1.0 / 纯编造 0.0
+    # 下限按「不同字段数」算（2026-11-16）：按条目数算的话，长文本允许子串引用
+    # （截断合理），同一句 error_message 切两段就能凑满，下限形同虚设
     min_evidence_refs: int = 2
     low_evidence_confidence_cap: float = 0.4  # 无据时的置信度上限
 
