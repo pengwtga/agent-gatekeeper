@@ -309,9 +309,16 @@ def test_bench_lowfi_end_to_end(tmp_path, monkeypatch):
     assert agga["by_category"]["single_hop"] == pytest.approx(1.0)
     assert all(r["key_steps_checked"] is False for r in out_a["results"])
 
-    # C 组：langgraph 未安装 → skipped，不做假数据
-    assert out_c["skipped"] != ""
-    assert out_c["aggregate"] is None
+    # C 组：装了 langgraph 就真跑（桩 LLM 重放）；没装则 skipped，不做假数据
+    from experiments.langgraph_baseline import graph as lg_mod
+
+    if lg_mod._HAS_LANGGRAPH:
+        assert out_c["skipped"] == ""
+        assert out_c["aggregate"] is not None
+        assert len(out_c["results"]) == len(cases)
+    else:
+        assert out_c["skipped"] != ""
+        assert out_c["aggregate"] is None
 
 
 def test_report_marks_lowfi(tmp_path, monkeypatch):
@@ -345,3 +352,57 @@ def test_langgraph_baseline_degrades_cleanly():
     else:
         g = lg.build_graph(_L(), build_registry())
         assert g is not None
+
+
+# ── C 基线回归（真实缺陷钉死：装了 langgraph 才跑，没装 skip） ──────────────
+def _stub_registry_with_tool():
+    async def _h(**kwargs):
+        return {"ok": True}
+
+    return build_registry(("kb_stats", {}, _h))
+
+
+@pytest.mark.skipif(
+    not __import__("experiments.langgraph_baseline.graph", fromlist=["_HAS_LANGGRAPH"])._HAS_LANGGRAPH,
+    reason="langgraph 未安装（/tmp/lg_env 或 site-packages）")
+def test_langgraph_state_schema_keeps_counter():
+    """回归：裸 dict schema 下节点返回值整体替换 state，i/steps 会丢。
+    修法是 TypedDict 按键合并——这里钉住「工具步之后 state 还完整」。"""
+    from experiments.langgraph_baseline.graph import run_case
+
+    script = [
+        {"action": "tool", "tool": "kb_stats", "args": {}, "thought": "看分布", "confidence": 0.9},
+        {"action": "finish", "conclusion": "类别分布正常", "root_cause_class": "config",
+         "evidence": [{"field": "kb", "ref": "kb_stats#1", "quote": "counts"}],
+         "confidence": 0.9},
+    ]
+    d = asyncio.run(run_case("看一眼知识库分布", llm=ScriptedLLM(script),
+                             registry=_stub_registry_with_tool()))
+    assert d["status"] == "ok"
+    assert d["root_cause_class"] == "config"
+    # 关键断言：工具步真的执行了、被记录（旧 bug 下这里会是 0 步或 KeyError）
+    assert len(d["steps"]) == 1 and d["steps"][0]["tool"] == "kb_stats"
+    assert d["steps"][0]["ok"] is True
+
+
+@pytest.mark.skipif(
+    not __import__("experiments.langgraph_baseline.graph", fromlist=["_HAS_LANGGRAPH"])._HAS_LANGGRAPH,
+    reason="langgraph 未安装")
+def test_run_langgraph_case_called_tools_not_int():
+    """回归：run_langgraph_case 曾先把 steps 归约成长度再取 called_tools（int 不可迭代）。"""
+    from bench.run import run_langgraph_case
+
+    script = [
+        {"action": "tool", "tool": "kb_stats", "args": {}, "thought": "看分布", "confidence": 0.9},
+        {"action": "finish", "conclusion": "ok", "root_cause_class": "config",
+         "evidence": [{"field": "kb", "ref": "kb_stats#1", "quote": "counts"}],
+         "confidence": 0.9},
+    ]
+
+    async def scenario():
+        return await run_langgraph_case(
+            build_cases()[0], ScriptedLLM(script), _stub_registry_with_tool())
+
+    d = asyncio.run(scenario())
+    assert d["called_tools"] == ["kb_stats"]
+    assert isinstance(d["steps"], int)

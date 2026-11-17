@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional
 from app.core.tools import ToolRegistry
 from oncall.budget import RunBudget
 from oncall.clock import Clock
-from oncall.context import build_messages
+from oncall.context import build_messages, default_class_catalog
 from oncall.policy import ALLOW, APPROVAL, decide
 from oncall.sensors import check_finish
 from oncall.tools import ToolCallRecord, call_tool, side_effect_of, specs_for_prompt
@@ -115,7 +115,8 @@ async def run_loop(
                          reason=_budget_reason(budget, budget_ms, i))
 
         system, user = build_messages(goal, facts, steps, tool_specs,
-                                      memory_block=memory_block)
+                                      memory_block=memory_block,
+                                      class_catalog=default_class_catalog())
         try:
             # RunBudget 与 v1 Budget 的接口同名（remaining_ms/slice/exhausted），
             # 直接传进去让 LLM 客户端把「剩余预算」当超时上界

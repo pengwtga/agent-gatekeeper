@@ -48,13 +48,15 @@ def build_default_registry(rag) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(Tool(
         name="kb_stats",
-        description="查询值班知识库的统计信息：工单总数、按根因类别的分布、当前检索模式",
+        description="知识库概览统计（工单总数/类别分布/检索模式）。只是仪表盘——"
+                    "排障时不要用它查具体问题，用 rag_search 检索知识库条目。",
         params={},
         handler=kb_stats,
     ))
     registry.register(Tool(
         name="query_incidents",
-        description="按根因类别查询历史事件样例（来自评测集），用于了解某类问题的典型表现",
+        description="按根因类别查询历史同类事件样例（来自评测集），用于对照本次现象。"
+                    "与 rag_search 搭配构成双源证据：rag_search 给处置方法，这里给历史案例。",
         params={
             "root_cause_class": {"type": "string", "description": "根因类别枚举值", "required": True},
             "limit": {"type": "integer", "description": "返回条数，默认 3，上限 10", "required": False},

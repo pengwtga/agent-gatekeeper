@@ -18,7 +18,7 @@ bench --arm langgraph 会记录 skipped 并在报告里如实标注——不做�
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 
 
 class LanggraphUnavailable(RuntimeError):
@@ -33,6 +33,19 @@ except ImportError:  # pragma: no cover —— CI 环境无 langgraph 时走这�
     LanggraphUnavailable = type("LanggraphUnavailable", (RuntimeError,), {})
 
 MAX_STEPS = 12  # 与 B 对齐（RunOptions.max_steps）
+
+
+class _State(TypedDict, total=False):
+    """为什么用 TypedDict 而不是裸 dict：裸 dict 是单通道、节点返回值整体替换 state，
+    一个只更新 tokens 的节点会把 i/steps 全弄丢；TypedDict 按键建通道、按键合并，
+    节点可以只返回变化的键——这是 LangGraph 最小 agent 的标准写法。"""
+
+    goal: str
+    facts: list
+    steps: list
+    tokens: int
+    i: int
+    _llm_out: dict
 
 
 def _action_of(out: dict) -> str:
@@ -95,7 +108,7 @@ def build_graph(llm: Any, registry: Any, *, max_steps: int = MAX_STEPS):
             return END
         return "tools"
 
-    g = StateGraph(dict)
+    g = StateGraph(_State)
     g.add_node("agent", agent_node)
     g.add_node("tools", tools_node)
     g.set_entry_point("agent")

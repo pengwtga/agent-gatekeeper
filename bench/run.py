@@ -170,10 +170,9 @@ async def run_langgraph_case(case: Case, llm: Any, registry: Any) -> dict[str, A
     wall_ms = int((time.perf_counter() - t0) * 1000)
     d["tokens"] = d.pop("tokens", 0)
     d["wall_ms"] = wall_ms
-    d["steps"] = len(d.get("steps") or [])
+    d["called_tools"] = [s["tool"] for s in d.get("steps") or [] if not s.get("skipped")]
+    d["steps"] = len(d.get("steps") or [])  # 注意：先取 called_tools 再归约为步数
     d["refused"] = d["status"] == "needs_human" and d.get("pending_approval") is None
-    d["called_tools"] = [s["tool"] for s in d.get("steps") if not s.get("skipped")] \
-        if d.get("steps") else []
     d["check_key_steps"] = True
     return d
 
