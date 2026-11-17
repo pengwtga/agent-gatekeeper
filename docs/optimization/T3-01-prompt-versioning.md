@@ -46,11 +46,15 @@ prompt 不是配置，是**行为的一部分**——改一个字，所有样本
 prompts/
 ├─ index.json            # 唯一入口：{name: {active, versions: {v1: {file, vars, note, created}}}}
 ├─ root_cause.v1.md      # 分类 system prompt（{role_intro} {domain} {classes} {n_classes}）
+├─ root_cause.v2.md      # 分类 v2：输出加 evidence_refs（见 T3-2）
 ├─ rag_answer.v1.md      # 助手答复 prompt（{role_intro} {id_field}）
+├─ rag_answer.v2.md      # 助手答复 v2：去掉首句冗余（见 T5-3）
 └─ rag_rerank.v1.md      # 检索重排 system prompt（无变量）
 ```
 
-`index.json` 里三个 prompt 的 `active` 都是 `v1`，`note` 写明来源（"从 xxx 外置，文本逐字保留"）。
+`index.json` 里三个 prompt 的初始 `active` 都是 `v1`，`note` 写明来源（"从 xxx 外置，文本逐字保留"）。
+后续演进各加了 v2：`root_cause` v2 = 结构化引用（T3-2），`rag_answer` v2 = 去首句冗余（T5-3），
+旧的 v1 都保留着用于逐字回滚与 A/B。
 
 ### app/prompts.py
 

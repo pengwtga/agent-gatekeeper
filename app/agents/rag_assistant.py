@@ -40,7 +40,10 @@ _DATA_DIR = Path(__file__).parent.parent.parent / "data"  # app/agents/ → 项�
 
 def _default_spec() -> AssistantSpec:
     """SSRM 值班助手：默认领域（保持旧行为向后兼容）"""
-    return AssistantSpec(kb_file=_DATA_DIR / "ssrm" / "kb_tickets.jsonl", threshold=0.55)
+    return AssistantSpec(
+        kb_file=_DATA_DIR / "ssrm" / "kb_tickets.jsonl", threshold=0.55,
+        role_intro="SSRM（供应商管理系统）值班团队的运维助手",  # 不填会退化成「智能助手」
+    )
 
 
 class RagAssistant:

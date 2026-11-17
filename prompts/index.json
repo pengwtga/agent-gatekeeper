@@ -18,12 +18,18 @@
     }
   },
   "rag_answer": {
-    "active": "v1",
+    "active": "v2",
     "versions": {
       "v1": {
         "file": "rag_answer.v1.md",
         "created": "2026-11-13",
         "note": "从 rag_assistant.SYSTEM_PROMPT_TMPL 外置，文本逐字保留",
+        "vars": ["role_intro", "id_field"]
+      },
+      "v2": {
+        "file": "rag_answer.v2.md",
+        "created": "2026-11-16",
+        "note": "去掉首句冗余：v1 是「你是{role_intro}。用户遇到问题时会来问你。」，而 role_intro 本身已以「会来问你」结尾，三域拼出来的 system prompt 都重复一遍。v2 只保留「你是{role_intro}。」，人设与场景全部由领域包给出",
         "vars": ["role_intro", "id_field"]
       }
     }

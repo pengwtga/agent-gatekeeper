@@ -18,5 +18,12 @@ pack = DomainPack(
     classes=ROOT_CAUSE_CLASSES,
     few_shot=FEW_SHOT,
     rule_baseline=rule_baseline,
-    assistant=AssistantSpec(kb_file=_DATA / "kb_tickets.jsonl", threshold=0.4)  # 150KB 扫描定标：0.4 覆盖 91%/精度 98%,
+    assistant=AssistantSpec(
+        kb_file=_DATA / "kb_tickets.jsonl",
+        threshold=0.4,  # 150KB 扫描定标：0.4 覆盖 91%/精度 98%
+        # 助手的领域人设（与 pack.role_intro 不同：后者是分类器的系统拓扑知识）。
+        # 不填会退化成「你是智能助手」，约束只剩知识库文本，进不了 system prompt。
+        role_intro="SSRM（供应商管理系统）值班团队的运维助手，"
+                   "值班同学遇到注册/变更卡单、EA 同步失败、审批回调异常时会来问你",
+    )
 )
