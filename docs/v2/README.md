@@ -80,6 +80,8 @@ bench/
   judge.py
   dataset_large.py   # F18：200 条生产量级数据集（手工 30 回归锚点 + incidents 生成 170）
   demo_trace.py      # F17：把一次排障的逐轮输入/输出录成 markdown
+  ab_subagents.py    # I7：F11/F10 三臂消融（base/sub/noskill）
+  spawn_trigger_probe.py  # I8：新旧触发判据的触发面对照（0 次 LLM）
 oncall/router.py     # F18：路由器（风险预筛 → 覆盖探针 → 可选仲裁）
 experiments/langgraph_baseline/   # 基线 C，只被 bench import
 tests/test_architecture.py        # 依赖方向守卫
@@ -100,6 +102,7 @@ tests/test_architecture.py        # 依赖方向守卫
 | I5 ✅（F17） | F17 | `python -m bench.demo_trace --case SH-01` 逐轮录出「上一轮结果怎么进下一轮」；`--arm harness_bare` 出消融数字 | 门禁退回后有且只有一轮修正（`llm.calls == 2` 断言）；只差 history 时 harness 代查一次且**不代写 evidence**；关掉开关行为回到 I4；真模型 SH-01 从 needs_human → 3 轮 2 步 ok（docs/v2/example-trace.md） |
 | I6 ✅（F18） | F18 | `--arm hybrid --dataset large` 一条命令出混合架构对照；路由分布表 + 失败代价表 | 路由自检：单跳 90/90、危险 30/30；真模型 200 条：hybrid 86% vs pipeline 70% vs harness 53%，错误处置 22 vs 45；`F18-eval-qa.md` 四问详解 |
 | I7 ✅（F10/F11 补齐） | F10 F11 | `oncall ask "为什么…影响面多大" --verbose` 能看到 `[skill]` 命中与 `[subagent]` 两路结论；bench `--subagents force` 出消融 | 加 skill 不改代码即命中（单测）；未命中只付索引一行；子 agent 拿不到写工具（机制断言）、两路并行（80ms×2 < 150ms）、冲突不投票（禁断言根因）、单路超时/重复调用不拖垮整组；全量 207 passed |
+| I8 ✅（F11 判据） | F11 F18 | `python -m bench.spawn_trigger_probe` 出触发面对照（0 次 LLM）；`oncall ask` 输出「并行取证：未触发（原因）」 | 措辞判据 0.5% → 簇分裂判据 8.5%（agent 路径 3/3 是库外误触发）→ 加 `strong_cover` 护栏后 0/200，故主路径改为**门禁退回 + 缺口 ≥2**（history+topology 并行，类名写进 hint）；只差 history 仍走 F17 单点补齐 |
 
 ---
 

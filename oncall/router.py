@@ -102,27 +102,39 @@ async def route_request(goal: str, rag: Any, *, use_llm: bool = False,
     class_field = rag.spec.class_field
     top_classes = [str(h.get(class_field) or "") for h in hits[:3]]
     votes5 = Counter(top_classes).most_common(1)[0] if top_classes else ("", 0)
+    # 候选簇数（去重、剔除空类）：F11 的并行取证判据直接用这个数——
+    # 路由探针已经付过一次检索成本，不让它白跑，这是混合架构的协同点。
+    candidates = [c for c in dict.fromkeys(top_classes) if c]
+    spread = {"top_score": top_score, "class_spread": len(candidates),
+              # strong_cover：这不是路由判据，是给下游（F11 并行取证）的护栏——
+              # 弱覆盖带里的「多簇」往往是库外问题撞上了多个类的词面，
+              # 拿它当「值得多角度探索」会让并行取证专门服务本该转人工的请求。
+              "strong_cover": top_score >= COVER_BAND,
+              "candidate_classes": candidates}
 
     if top_score < WEAK_BAND or not hits:
         return RouteDecision("refuse", "知识库几乎无词汇重叠（库外问题），转人工",
-                             {"top_score": top_score, "admitted": 0})
+                             {"top_score": top_score, "admitted": 0, "class_spread": len(candidates),
+                              "candidate_classes": candidates})
 
     if top_score < COVER_BAND:
         # 弱覆盖带：类别仍有共识 → 值得探索；共识也散 → 库外转人工
         if votes5[1] >= AGREE_MIN_VOTES:
             return RouteDecision("agent", "弱覆盖但类别有共识，交带门禁的 agent loop 取证",
-                                 {"top_score": top_score, "weak_band": True,
-                                  "top_class": votes5[0]})
+                                 {**spread, "weak_band": True, "top_class": votes5[0]})
         return RouteDecision("refuse", "弱覆盖且类别共识散（库外问题），转人工",
-                             {"top_score": top_score, "weak_band": True})
+                             {**spread, "weak_band": True})
 
     # 强覆盖带：方向一致才允许 pipeline，否则探索
     admitted = [h for h in hits if h["score"] >= COVER_BAND][:3]
     classes = [str(h.get(class_field) or "") for h in admitted]
     top_class, votes = Counter(classes).most_common(1)[0]
     agreement = votes / len(classes) if classes else 0.0
+    admitted_classes = [c for c in dict.fromkeys(classes) if c]
     signals = {"top_score": top_score, "top_class": top_class,
-               "votes": votes, "agreement": round(agreement, 2)}
+               "votes": votes, "agreement": round(agreement, 2),
+               "class_spread": len(admitted_classes),
+               "candidate_classes": admitted_classes}
 
     if votes >= AGREE_MIN_VOTES and agreement >= AGREE_MIN_RATIO and top_score >= PIPE_MIN_TOP:
         return RouteDecision("pipeline", f"库内覆盖且方向一致（{top_class} x{votes}），固定流程处置",

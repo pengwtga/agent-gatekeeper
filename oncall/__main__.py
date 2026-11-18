@@ -39,7 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--no-skills", action="store_true",
                         help="关闭技能库（不注入索引，也不注册 load_skill）")
         sp.add_argument("--subagents", choices=("auto", "off", "force"), default="auto",
-                        help="并行取证触发：auto=多源线索才 spawn；off=关；force=总是")
+                        help="并行取证触发：auto=门禁退回按缺口并行（首轮仅在客观信号/措辞命中时）；"
+                             "off=关；force=总是")
 
     ask = sub.add_parser("ask", help="一句话提问，跑一次排障")
     ask.add_argument("goal")
@@ -95,6 +96,9 @@ def _render_text(result) -> str:
         ok = sum(1 for s in o.subagents if s.get("summary") and not s.get("error"))
         lines.append(f"并行取证：{len(o.subagents)} 路（{ok} 路有结论）"
                      + ("，存在冲突" if any(f.get("field") == "conflict" for f in o.facts) else ""))
+    elif o.spawn.get("why"):
+        # 没并行也要说清为什么——否则「F11 有没有生效」只能靠猜
+        lines.append(f"并行取证：未触发（{o.spawn['why']}）")
     if o.reason:
         lines.append(f"原因：{o.reason}")
     return "\n".join(lines)

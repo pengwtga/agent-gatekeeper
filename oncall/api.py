@@ -43,8 +43,13 @@ class RunOptions:
     auto_evidence: bool = True
     # F10：技能索引常驻、命中才注入正文（关掉 = 消融组，回到纯 prompt 行为）
     use_skills: bool = True
-    # F11：并行取证触发模式。auto=多源线索才 spawn；off=关；force=总是（消融/调试用）
+    # F11：并行取证触发模式。auto=按客观信号（KB 根因簇分裂，无信号时退回措辞线索）；
+    # off=关；force=总是（消融/调试用）
     subagents: str = "auto"
+    # F11：路由层的探针信号（class_spread / candidate_classes），由混合架构的
+    # 上层（router/hybrid 臂）传入。没有路由层时留空——此时只剩措辞兜底判据，
+    # 这是有意的取舍：宁可少并行，也不为拿不到证据的判断付两路 LLM 的钱。
+    spawn_signal: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -89,6 +94,7 @@ class RunResult:
             "pending_approval": o.pending_approval,
             "repairs": o.repairs,
             "subagents": o.subagents,
+            "spawn": o.spawn,
         }
 
 
@@ -123,6 +129,7 @@ async def run_incident(goal: str, *, deps: Deps, opts: Optional[RunOptions] = No
         skills=getattr(deps, "skills", None),
         use_skills=opts.use_skills,
         subagents=opts.subagents,
+        spawn_signal=opts.spawn_signal,
     )
     if deps.store is not None:
         _persist_status(deps.store, run_id, outcome)
@@ -278,6 +285,7 @@ async def resume_incident(run_id: str, *, deps: Deps, opts: Optional[RunOptions]
         skills=getattr(deps, "skills", None),
         use_skills=opts.use_skills,
         subagents=opts.subagents,
+        spawn_signal=opts.spawn_signal,
     )
     _persist_status(store, run_id, outcome)
     _remember(getattr(deps, "memory", None), opts.domain, run["goal"], run_id, outcome)

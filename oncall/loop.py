@@ -21,7 +21,7 @@ from oncall.clock import Clock
 from oncall.context import build_messages, default_class_catalog
 from oncall.policy import ALLOW, APPROVAL, decide
 from oncall.sensors import check_finish
-from oncall.subagent import gather_evidence, should_spawn
+from oncall.subagent import decide_spawn, gather_evidence, lines_for_repair
 from oncall.tools import (
     SideEffect,
     ToolCallRecord,
@@ -56,6 +56,8 @@ class Outcome:
     repairs: list[dict] = field(default_factory=list)
     # F11：并行取证小组的结论（每路一行；不进 steps，避免与 checkpoints 的 (run_id,i) 冲突）
     subagents: list[dict] = field(default_factory=list)
+    # F11：这一轮「要不要并行取证」的决策与理由（含没触发的原因，供归因）
+    spawn: dict = field(default_factory=dict)
 
 
 def _fingerprint(name: str, args: dict) -> str:
@@ -132,6 +134,7 @@ async def run_loop(
     skills: Any = None,
     use_skills: bool = True,
     subagents: str = "auto",
+    spawn_signal: Optional[dict] = None,
 ) -> Outcome:
     """store 传入时每步落库（F06 checkpoint）；initial_* 由 resume 重建状态。
 
@@ -152,15 +155,23 @@ async def run_loop(
     repeats = 0
     repairs: list[dict] = []
     auto_filled = False
+    repair_gathered = False   # F11：退回时并行取证只做一次（成本固定）
     feedback = ""
     tokens = {"prompt": 0, "completion": 0}
     tool_specs = specs_for_prompt(registry)
+    # F11：并行取证决策（空 dict = 还没判断，例如 resume 不重跑首轮）
+    spawn_info: dict[str, Any] = {}
 
     def _ckpt(record: ToolCallRecord) -> None:
         """每步执行后、下一步装配前落库；崩溃最多丢一步。"""
         steps.append(record)
         if store is not None:
             store.checkpoint(run_id, steps, facts)
+
+    def _wrap_here(status, *args, **kwargs) -> Outcome:
+        """出口统一带上 spawn 决策：每个终态都要能回答「这一轮为什么没并行取证」。"""
+        kwargs.setdefault("spawn", spawn_info)
+        return _wrap(status, *args, **kwargs)
 
     async def _fill_history(cls_name: str, at_i: int) -> str:
         """确定性补齐：断言了根因却只有一个来源 → harness 自己补 history。
@@ -213,26 +224,43 @@ async def run_loop(
             skill_index = ""
 
     # ── F11：首轮并行取证（只在 fresh run 且判定值得并行时）──
+    #
+    # 判据改造（I8）：主判据从「goal 措辞有没有多源线索词」换成路由层探针给出的
+    # **根因簇是否分裂**。原因：真实 goal 是现象描述，措辞判据在 200 条数据集上
+    # 只放行 1 条（0.5%）——机制等于不存在。簇分裂是客观信号（KB top 命中跨 ≥2 类），
+    # 且路由探针已经付过检索成本，复用它不增加任何调用。
     sub_records: list[dict] = []
     conflicts: list[str] = []
-    if subagents in ("auto", "force") and not initial_facts \
-            and should_spawn(goal, registry, subagents):
-        gathered = await gather_evidence(goal, llm=llm, registry=registry,
-                                         run_id=run_id, budget=budget, observer=observer)
-        if gathered.findings:
-            facts.extend(gathered.facts)
-            sub_records = [f.to_dict() for f in gathered.findings]
-            conflicts = gathered.conflicts
-            tokens["prompt"] += int(gathered.usage.get("prompt") or 0)
-            tokens["completion"] += int(gathered.usage.get("completion") or 0)
-            budget.add_usage(int(gathered.usage.get("prompt") or 0),
-                             int(gathered.usage.get("completion") or 0))
-            if store is not None:
-                store.checkpoint(run_id, steps, facts)
+    signal = dict(spawn_signal or {})
+    spread = int(signal.get("class_spread") or 0)
+    split = spread >= 2 or bool(signal.get("cls_split"))
+    # 探针没给 strong_cover 时按「强覆盖」处理：这条护栏只用于否掉弱覆盖的假分裂，
+    # 不该顺手把措辞兜底判据也关掉。
+    strong_cover = bool(signal.get("strong_cover", True))
+    if not initial_facts:
+        decision = decide_spawn(goal, registry, subagents, class_spread=spread,
+                               cls_split=split, strong_cover=strong_cover)
+        spawn_info.update(decision.to_dict())
+        if observer:
+            observer("spawn", spawn_info)
+        if decision.should:
+            gathered = await gather_evidence(goal, llm=llm, registry=registry,
+                                             run_id=run_id, budget=budget, observer=observer,
+                                             lines=decision.lines)
+            if gathered.findings:
+                facts.extend(gathered.facts)
+                sub_records = [f.to_dict() for f in gathered.findings]
+                conflicts = gathered.conflicts
+                tokens["prompt"] += int(gathered.usage.get("prompt") or 0)
+                tokens["completion"] += int(gathered.usage.get("completion") or 0)
+                budget.add_usage(int(gathered.usage.get("prompt") or 0),
+                                 int(gathered.usage.get("completion") or 0))
+                if store is not None:
+                    store.checkpoint(run_id, steps, facts)
 
     for i in range(start_i, start_i + max_steps):
         if budget.exhausted() or budget.token_exhausted():
-            return _wrap(BUDGET_EXHAUSTED, steps, facts, started, clock, tokens,
+            return _wrap_here(BUDGET_EXHAUSTED, steps, facts, started, clock, tokens,
                          reason=_budget_reason(budget, budget_ms, i), repairs=repairs,
                          subagents=sub_records)
 
@@ -248,7 +276,7 @@ async def run_loop(
             # 直接传进去让 LLM 客户端把「剩余预算」当超时上界
             out = await llm.chat_json(system, user, budget=budget)
         except Exception as exc:  # noqa: BLE001 —— 容灾链全挂才会到这里
-            return _wrap(FAILED, steps, facts, started, clock, tokens,
+            return _wrap_here(FAILED, steps, facts, started, clock, tokens,
                          reason=f"LLM 调用失败: {type(exc).__name__}: {exc}", repairs=repairs,
                          subagents=sub_records)
 
@@ -265,7 +293,7 @@ async def run_loop(
         action = _action_of(out)
         if action == "finish":
             verdict = _finish(out, steps, facts, started, clock, tokens, repairs=repairs,
-                              subagents=sub_records)
+                              subagents=sub_records, spawn=spawn_info)
             # F11：两路取证结论矛盾时不允许断言根因——矛盾本身是信息，投票是掩盖
             if conflicts and verdict.root_cause_class not in ("", "unknown"):
                 msg = "取证冲突未解决，不允许断言根因（" + conflicts[0] + "）"
@@ -286,15 +314,48 @@ async def run_loop(
                 return verdict
 
             # ── 门禁退回：先做确定性补齐，再把缺口当反馈喂回去 ──
+            #
+            # F11 的第二个（也是 SSRM 域里唯一真正会生效的）触发点：退回时缺口已知，
+            # 类名已确定且过了 KB 支持性校验 → history + topology 两路并行才有根据。
+            # 只差 history 时不走这里：F17 的单点补齐更便宜（1 次工具调用 vs 2 路 LLM）。
             filled = ""
             if can_fill:
                 auto_filled = True
                 filled = await _fill_history(str(verdict.root_cause_class), i)
+            elif (subagents in ("auto", "force") and not repair_gathered
+                  and verdict.root_cause_class not in ("", "unknown")):
+                have = {str(f.get("field") or "") for f in facts}
+                repair_lines = lines_for_repair(
+                    str(verdict.root_cause_class),
+                    need_history=not (have & HISTORY_FIELDS),
+                    need_topology="topology" not in have,
+                    kb_support=_kb_supports_class(facts, str(verdict.root_cause_class)),
+                    registry=registry,
+                )
+                if len(repair_lines) >= 2:
+                    repair_gathered = True
+                    gathered = await gather_evidence(goal, llm=llm, registry=registry,
+                                                     run_id=run_id, lines=repair_lines,
+                                                     budget=budget, observer=observer)
+                    if gathered.findings:
+                        facts.extend(gathered.facts)
+                        sub_records.extend(f.to_dict() for f in gathered.findings)
+                        conflicts.extend(gathered.conflicts)
+                        tokens["prompt"] += int(gathered.usage.get("prompt") or 0)
+                        tokens["completion"] += int(gathered.usage.get("completion") or 0)
+                        budget.add_usage(int(gathered.usage.get("prompt") or 0),
+                                         int(gathered.usage.get("completion") or 0))
+                        if store is not None:
+                            store.checkpoint(run_id, steps, facts)
+                        filled = ("harness 已按已知类名并行取证（history + topology），"
+                                  "结果在事实段中 field=history / field=topology 的条目。"
+                                  "引用时 ref 用那些条目的 ref、quote 摘原文。")
             repairs.append({
                 "attempt": len(repairs) + 1,
                 "at_step": i,
                 "errors": verdict.sensors.get("errors") or [verdict.reason],
                 "auto_filled": bool(filled),
+                "spawned": repair_gathered,
                 "root_cause_class": verdict.root_cause_class,
             })
             if observer:
@@ -310,14 +371,14 @@ async def run_loop(
                 return verdict  # 没预算修了：把这份「过门禁失败」的结论原样交出，供人复核
             continue
         if action == "ask_human":
-            return _wrap(NEEDS_HUMAN, steps, facts, started, clock, tokens,
+            return _wrap_here(NEEDS_HUMAN, steps, facts, started, clock, tokens,
                          reason=str(out.get("reason") or "模型主动转人工"), repairs=repairs,
                          subagents=sub_records)
 
         name = str(out.get("tool") or "").strip()
         args = out.get("args") if isinstance(out.get("args"), dict) else {}
         if not name:
-            return _wrap(NEEDS_HUMAN, steps, facts, started, clock, tokens,
+            return _wrap_here(NEEDS_HUMAN, steps, facts, started, clock, tokens,
                          reason="模型没有给出工具名", repairs=repairs,
                          subagents=sub_records)
 
@@ -326,7 +387,7 @@ async def run_loop(
             repeats += 1
             _ckpt(ToolCallRecord(i=i, tool=name, args=args, skipped="repeat"))
             if repeats >= MAX_REPEATS:
-                return _wrap(NEEDS_HUMAN, steps, facts, started, clock, tokens,
+                return _wrap_here(NEEDS_HUMAN, steps, facts, started, clock, tokens,
                              reason=f"无进展：连续 {repeats + 1} 次调用 {name} 且参数相同",
                              repairs=repairs, subagents=sub_records)
         else:
@@ -352,7 +413,7 @@ async def run_loop(
                     store.record_approval(approval_id, run_id, name, args,
                                           why=str(out.get("thought") or ""),
                                           risk=decision.risk, requires=decision.requires)
-                return _wrap(
+                return _wrap_here(
                     NEEDS_HUMAN, steps, facts, started, clock, tokens,
                     reason=decision.reason,
                     pending={
@@ -384,7 +445,7 @@ async def run_loop(
             if observer:
                 observer("tool", record.to_dict())
 
-    return _wrap(BUDGET_EXHAUSTED, steps, facts, started, clock, tokens,
+    return _wrap_here(BUDGET_EXHAUSTED, steps, facts, started, clock, tokens,
                  reason=f"步数用完（{max_steps} 步）", repairs=repairs,
                  subagents=sub_records)
 
@@ -409,7 +470,7 @@ def _action_of(out: dict) -> str:
 
 
 def _finish(out: dict, steps, facts, started, clock, tokens, *, repairs=None,
-            subagents=None) -> Outcome:
+            subagents=None, spawn=None) -> Outcome:
     evidence = out.get("evidence") if isinstance(out.get("evidence"), list) else []
     root_cause_class = str(out.get("root_cause_class") or "unknown")
     report = check_finish(str(out.get("conclusion") or ""), evidence,
@@ -424,13 +485,14 @@ def _finish(out: dict, steps, facts, started, clock, tokens, *, repairs=None,
         sensors=report.to_dict(),
         repairs=repairs,
         subagents=subagents,
+        spawn=spawn,
     )
 
 
 def _wrap(status, steps, facts, started, clock, tokens, *,
           conclusion="", root_cause_class="unknown", evidence=None,
           reason="", sensors=None, pending=None, repairs=None,
-          subagents=None) -> Outcome:
+          subagents=None, spawn=None) -> Outcome:
     return Outcome(
         status=status,
         conclusion=conclusion,
@@ -450,4 +512,5 @@ def _wrap(status, steps, facts, started, clock, tokens, *,
         },
         repairs=list(repairs or []),
         subagents=list(subagents or []),
+        spawn=dict(spawn or {}),
     )

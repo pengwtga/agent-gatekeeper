@@ -32,11 +32,20 @@ from oncall.tools import SideEffect, call_tool, side_effect_of, specs_for_prompt
 DEFAULT_MAX_STEPS = 3
 DEFAULT_TIMEOUT_MS = 20_000
 
-# 自动触发的多源线索词：出现这类词，说明结论需要串联两个以上信息源
+# 措辞线索词：**已降级为兜底判据**，只在拿不到客观信号时使用。
+#
+# 为什么降级（I8）：实测 200 条真实风格 goal 里只有 1 条（0.5%）含这类词——
+# 值班人写的是现象（「EA 同步超时，注册卡单」），没人会写「为什么/影响面」。
+# 用措辞做判据，等于让 F11 在生产上永远不触发。主判据必须换成客观信号：
+# 知识库命中的根因簇是否分裂（class_spread），它衡量的是「现象能不能被归到一个簇」，
+# 与用户怎么说无关。
 MULTI_SOURCE_HINTS = (
     "为什么", "影响", "上下游", "链路", "对比", "分别", "同时",
     "哪个组件", "哪个服务", "影响面", "波及", "根因",
 )
+
+# 新判据的门槛：KB 命中里出现 ≥2 个不同根因簇 = 方向不唯一 = 值得多角度并行取证
+SPLIT_MIN_CLASSES = 2
 
 
 @dataclass(frozen=True)
@@ -47,6 +56,9 @@ class EvidenceLine:
     field: str          # 证据落进事实段时用的 field（kb/topology/…）
     tools: tuple[str, ...]
     instruction: str
+    # 运行期补充的重点（例如「类名固定为 ea_sync_timeout」）。门禁退回后的取证
+    # 必须带这个：那时已知类名，不告诉子 agent 它就会自己猜一个去查。
+    hint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {"name": self.name, "field": self.field, "tools": list(self.tools)}
@@ -68,6 +80,16 @@ EVIDENCE_LINES: tuple[EvidenceLine, ...] = (
         instruction="说明该系统链路上与本次现象相关的组件（xFlow/EA/Dora 等）及调用关系，"
                     "指出最可能出问题的一环。只依据拓扑与事实，不要猜根因类名。",
     ),
+)
+
+# history 线路**不进首轮并行组**（没有类名就没法查，见模块 docstring），
+# 只在「门禁退回、类名已确定」时按需构造——这是它唯一成立的使用场景。
+HISTORY_LINE = EvidenceLine(
+    name="history",
+    field="history",
+    tools=("query_incidents",),
+    instruction="按指定的根因类名查历史同类工单，确认该类历史上确实出现过，"
+                "并摘一段能作为第二来源的原文。",
 )
 
 
@@ -145,9 +167,11 @@ def _sub_messages(goal: str, line: EvidenceLine, facts: Sequence[dict],
     """
     last = ("\n## 最后一步\n这是本路最后一次机会：**必须输出 finish**（结论可以写「已取到，"
             "但不足以判断」，不要再调工具）。\n" if last_step else "")
+    hint = f"\n## 本路重点\n{line.hint}\n" if line.hint else ""
     payload = (
         f"## 总任务\n{goal}\n\n"
-        f"## 你负责的线路：{line.name}\n{line.instruction}\n\n"
+        f"## 你负责的线路：{line.name}\n{line.instruction}\n"
+        f"{hint}\n"
         f"## 本路已取回的内容\n{_facts_block(facts)}\n\n"
         f"## 本路可用工具\n{json.dumps(list(tool_specs), ensure_ascii=False)}\n"
         f"{last}"
@@ -173,22 +197,128 @@ def available_lines(registry: ToolRegistry,
     return out
 
 
-def should_spawn(goal: str, registry: ToolRegistry, mode: str = "auto",
-                 *, lines: Optional[Sequence[EvidenceLine]] = None) -> bool:
-    """触发判定。三个条件同时成立才并行——不默认 spawn。
+@dataclass
+class SpawnDecision:
+    """「这一轮要不要并行取证」的完整决策，含理由与线路选择。
 
-    1. 至少两路可用（一路并行没有意义，串行调工具更便宜）；
-    2. auto 模式下 goal 里有多源线索（「为什么/影响面/链路…」）；
-    3. 不重复造预算：调用方保证只在首轮、facts 为空时调本函数。
+    为什么要把决策对象化而不是返回 bool：
+    1. **可观测**：`why` 直接进 Outcome.spawn，报告里能回答「这条为什么没并行」——
+       上一版只有 bool，跑完只知道「没触发」，不知道为什么；
+    2. **可归因**：`signal` 记录判据来源（split/wording/force），消融时能分离
+       「判据错了」和「机制没用」；
+    3. **可测**：判据是纯函数，单元测试不需要 LLM。
     """
+
+    should: bool = False
+    why: str = ""
+    signal: str = ""                 # split | wording | force | off | insufficient-lines
+    lines: tuple[EvidenceLine, ...] = ()
+    class_spread: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"should": self.should, "why": self.why, "signal": self.signal,
+                "lines": [line.name for line in self.lines], "class_spread": self.class_spread}
+
+
+def decide_spawn(
+    goal: str,
+    registry: ToolRegistry,
+    mode: str = "auto",
+    *,
+    class_spread: int = 0,
+    cls_split: bool = False,
+    strong_cover: bool = True,
+    lines: Optional[Sequence[EvidenceLine]] = None,
+) -> SpawnDecision:
+    """统一的触发判定：**客观信号优先，措辞只做兜底**。
+
+    判据优先级（先命中者生效）：
+    1. mode=off → 不并行（消融/低配环境一键关掉）；
+    2. 可用只读线路 <2 → 不并行（一路并行没有意义，串行调工具更便宜）；
+    3. mode=force → 并行（仅消融/调试，生产不开）；
+    4. **cls_split / class_spread≥2 且强覆盖** → 并行：知识库命中跨多个根因簇，
+       说明「现象无法唯一归簇」，正是多角度取证能降不确定性的场景。
+       这是主判据，来自路由层探针（0 次 LLM），与用户措辞无关；
+    5. 措辞含多源线索词 → 并行（兜底：拿不到路由信号时的旧判据）；
+    6. 其余 → 不并行。
+
+    `strong_cover` 护栏是数据集实测逼出来的（bench/report-spawn-trigger.md）：
+    不加它时，agent 路径上 3 条簇分裂触发**全部是库外拒答题**——弱覆盖带的
+    「多簇」只是词面撞上了多个类，不是真的多解。护栏让 split 判据只在
+    「强覆盖 + 方向分裂」时生效。
+
+    class_spread/cls_split/strong_cover 由调用方传入（router 探针结果）。纯 harness
+    路径没有路由层时不传，就只剩兜底判据——这是有意的：宁可少并行，
+    也不为一个拿不到证据的判断付 2 路 LLM 的钱。
+    """
+    usable = tuple(available_lines(registry, lines))
     if mode == "off":
-        return False
-    usable = available_lines(registry, lines)
+        return SpawnDecision(False, "并行取证已关闭（mode=off）", "off", (), class_spread)
     if len(usable) < 2:
-        return False
+        return SpawnDecision(False, f"可用只读线路只有 {len(usable)} 条（要求 ≥2），串行更便宜",
+                             "insufficient-lines", (), class_spread)
     if mode == "force":
-        return True
-    return any(h in goal for h in MULTI_SOURCE_HINTS)
+        return SpawnDecision(True, "force 模式（消融/调试）", "force", usable, class_spread)
+    split = cls_split or class_spread >= SPLIT_MIN_CLASSES
+    if split and strong_cover:
+        why = (f"知识库命中的根因簇不唯一（{class_spread or '?'} 个）且为强覆盖，"
+               f"现象无法唯一归簇 → 多角度并行取证")
+        return SpawnDecision(True, why, "split", usable, class_spread)
+    if split:
+        # 弱覆盖 + 多簇：更可能是库外问题撞词，交主 loop 自己判，并行只会喂噪声
+        return SpawnDecision(False, "簇数虽多但检索覆盖弱（更像库外问题撞词），不并行",
+                             "weak-cover", (), class_spread)
+    hits = [h for h in MULTI_SOURCE_HINTS if h in goal]
+    if hits:
+        return SpawnDecision(True, f"goal 含多源线索词（{'/'.join(hits[:2])}）→ 并行取证",
+                             "wording", usable, class_spread)
+    return SpawnDecision(False, "KB 命中方向唯一且 goal 无多源线索，串行足够",
+                         "no-signal", (), class_spread)
+
+
+def should_spawn(goal: str, registry: ToolRegistry, mode: str = "auto",
+                 *, lines: Optional[Sequence[EvidenceLine]] = None,
+                 class_spread: int = 0, cls_split: bool = False,
+                 strong_cover: bool = True) -> bool:
+    """兼容旧调用点的薄封装（判据本体在 decide_spawn）。"""
+    return decide_spawn(goal, registry, mode, class_spread=class_spread,
+                        cls_split=cls_split, strong_cover=strong_cover, lines=lines).should
+
+
+def lines_for_repair(
+    verdict_class: str,
+    *,
+    need_history: bool,
+    need_topology: bool,
+    kb_support: bool,
+    registry: ToolRegistry,
+    lines: Optional[Sequence[EvidenceLine]] = None,
+) -> tuple[EvidenceLine, ...]:
+    """门禁退回后按**缺口**选线路——这是 F11 在 SSRM 域里真正会生效的触发点。
+
+    为什么首轮预判不可靠（bench/report-spawn-trigger.md 的实测）：
+    用「KB 根因簇分裂」当首轮判据，agent 路径上 3/3 触发都是库外拒答题——
+    弱覆盖下的「多簇」只是词面撞词，不是真的多解。首轮唯一能确定的信号太少。
+
+    退回时刻不一样：类名已经由模型断言且**经过 KB 支持性校验**，缺口也已知
+    （缺 history / 缺 topology）。此时两路取证才是「有根据的并行」：
+    - history 路用固定类名查（hint 里写死，防止子 agent 自己换类名）；
+    - topology 路补影响面/上下游——这类问题主 loop 往往一次答不完整。
+    只凑得出 1 路就不并行（调用方判断 len>=2），交 F17 的单点补齐更便宜。
+    """
+    pool_source = tuple(lines) if lines is not None else (*EVIDENCE_LINES, HISTORY_LINE)
+    pool = {line.name: line for line in available_lines(registry, pool_source)}
+    out: list[EvidenceLine] = []
+    if need_history and kb_support and "history" in pool:
+        out.append(EvidenceLine(
+            name="history", field="history", tools=HISTORY_LINE.tools,
+            instruction=HISTORY_LINE.instruction,
+            hint=f"根因类名已确定：**{verdict_class}**。用 query_incidents 时"
+                 f"root_cause_class 必须填这个值，不要换成别的类名。",
+        ))
+    if need_topology and "topology" in pool:
+        out.append(pool["topology"])
+    return tuple(out)
 
 
 async def run_subagent(

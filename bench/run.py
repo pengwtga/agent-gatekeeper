@@ -195,8 +195,11 @@ class HybridArm:
                    "check_key_steps": True}
         else:  # agent
             llm = ScriptedLLM(case.plan) if self.mode == "lowfi" else _real_llm()
+            # 路由探针的结果直接当 F11 的触发信号（class_spread / cls_split）：
+            # 探针已经付过检索成本，不让它白跑——这是混合架构的协同点。
             out = await run_harness_case(case, llm, self.registry, self.db_dir,
-                                         subagents=self.subagents)
+                                         subagents=self.subagents,
+                                         spawn_signal=decision.signals)
             out["wall_ms"] = out.get("wall_ms", 0) + route_ms
         return out, decision
 
@@ -204,7 +207,8 @@ class HybridArm:
 # ── B 组：自研 harness ────────────────────────────────────────────────────
 async def run_harness_case(case: Case, llm: Any, registry: Any, db_dir: Path, *,
                            repairs: int = 1, auto_evidence: bool = True,
-                           subagents: str = "off", use_skills: bool = True) -> dict[str, Any]:
+                           subagents: str = "off", use_skills: bool = True,
+                           spawn_signal: dict | None = None) -> dict[str, Any]:
     """B 组。repairs/auto_evidence 用于消融（harness_bare = 关掉 F17 的两个优化）。
 
     lowfi 必须 subagents=off：桩 LLM 是按步重放的脚本，并行子 agent 会把
@@ -219,7 +223,8 @@ async def run_harness_case(case: Case, llm: Any, registry: Any, db_dir: Path, *,
                     skills=skill_book() if use_skills else None)
         opts = RunOptions(max_steps=12, budget_ms=90_000, max_tokens=100_000,
                           max_finish_repairs=repairs, auto_evidence=auto_evidence,
-                          subagents=subagents, use_skills=use_skills)
+                          subagents=subagents, use_skills=use_skills,
+                          spawn_signal=dict(spawn_signal or {}))
         t0 = time.perf_counter()
         result = await run_incident(case.goal, deps=deps, opts=opts)
         wall_ms = int((time.perf_counter() - t0) * 1000)
@@ -243,6 +248,8 @@ async def run_harness_case(case: Case, llm: Any, registry: Any, db_dir: Path, *,
         "check_key_steps": True,
         "repairs": len(d.get("repairs") or []),
         "subagents": len(d.get("subagents") or []),
+        # F11 触发决策：跑完能回答「这条为什么没并行」（signal/why/class_spread）
+        "spawn": d.get("spawn") or {},
         # F11 的取证是「子 agent 调的工具」，主 loop 的 steps 里看不见。
         # 不合并进判分就相当于：子 agent 代劳了，judge 判它没做——口径伪影。
         "sub_called_tools": [t for t in sub_called if t],
