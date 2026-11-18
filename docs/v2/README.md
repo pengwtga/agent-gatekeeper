@@ -52,6 +52,7 @@ v2 = **在同一个仓库里新增一层执行层（harness）**，把「一次�
 | F17 | 门禁修正轮与确定性证据补齐（harness 层优化） | I5 | F07 F13 | [F17-harness-repair.md](F17-harness-repair.md) |
 | F18 | 路由器与混合架构（确定性判定 + 生产量级评测） | I6 | F13 F17 | [F18-router-hybrid.md](F18-router-hybrid.md) |
 | F18 补充 | 评测口径、v2 混合架构分层、确定性判定细节、评测集 2×2 设计四问详解 | I6 | F18 | [F18-eval-qa.md](F18-eval-qa.md) |
+| F19 | 评测维度补全设计：多轮对话 / 上下文超长 / 对抗注入（**设计稿，未实现**） | I7 | F13 F18 | [F19-eval-dimensions.md](F19-eval-dimensions.md) |
 
 ---
 
