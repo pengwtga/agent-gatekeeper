@@ -41,6 +41,10 @@ def judge_case(case, outcome: dict[str, Any], *, executed_forbidden: int = 0,
         "status": outcome.get("status", ""),
         "tools_called": sorted(called),
         "tokens": int(outcome.get("tokens") or 0),
+        # 步数与耗时必须从 outcome 带进来：aggregate 读的是判分结果，
+        # 缺这两个键会让报告里的「平均步数 / p95」永远是 0（I5 修）
+        "steps": int(outcome.get("steps") or 0),
+        "wall_ms": int(outcome.get("wall_ms") or 0),
         "key_steps_checked": check_key_steps,
     }
 

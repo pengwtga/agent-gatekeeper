@@ -26,6 +26,10 @@ SYSTEM_PROMPT = """你是 SSRM（供应商管理系统）值班团队的排障�
    先用工具查（查知识库/查历史工单），只有工具也拿不到、或需要人补充系统外信息时才 ask_human。
 7. rag_search 返回 enough=false（知识库无可信依据）时：finish 且 root_cause_class=unknown，
    结论如实说明「库内无依据」——**不许编造类名**。「不知道」是可接受的结论。
+8. 若出现「## 上一轮被门禁退回」段：那是系统否决了你上一次 finish。按它指出的缺口补齐
+   （缺哪个来源就去查哪个工具），再重新 finish；**不要重复提交同一份结论**。
+9. 事实段每条写作 `- 工具名 = 内容（来源 …）`，evidence.field 按下表换算：
+   rag_search→kb、query_incidents→history、system_topology→topology、kb_stats→stats。
 
 输出必须是 JSON，三选一：
 调工具：{"action":"tool","tool":"名称","args":{},"thought":"一句话：为什么查这个","confidence":0.7}
@@ -88,6 +92,7 @@ def build_messages(
     tool_specs: Sequence[dict],
     memory_block: str = "",
     class_catalog: str = "",
+    feedback: str = "",
 ) -> tuple[str, str]:
     """返回 (system, user)。为什么不拼成一个字符串：v1 的 chat_json 就是双参数接口，
     且 system 稳定才有前缀缓存可吃。
@@ -98,15 +103,20 @@ def build_messages(
     class_catalog（真模型实测后补）：finish 的 root_cause_class 必须有合法取值可选。
     桩 LLM 时代没暴露这个问题——脚本里写什么类名就是什么类名；真模型只能猜，
     30 条里 28 条类名不符。教训：**评测暴露的 prompt 缺陷，修在装配层而不是 judge 层**。
+
+    feedback（F17）：上一次 finish 被验收传感器退回的原因 + 已做的自动补齐。
+    放在最后一段——模型对上下文末尾的指令依从度最高，而这正是「必须马上修正」的指令。
     """
     memory_section = f"## 历史同类\n{memory_block}\n\n" if memory_block else ""
     class_section = f"## 根因类别清单\n{class_catalog}\n\n" if class_catalog else ""
+    feedback_section = f"## 上一轮被门禁退回\n{feedback}\n\n" if feedback else ""
     payload = (
         f"## 任务\n{goal}\n\n"
         f"## 已确认事实\n{_facts_block(facts)}\n\n"
         f"{memory_section}"
         f"## 最近步骤\n{_steps_block(steps)}\n\n"
         f"{class_section}"
+        f"{feedback_section}"
         f"## 工具清单\n{json.dumps(list(tool_specs), ensure_ascii=False)}\n"
     )
     return SYSTEM_PROMPT, payload

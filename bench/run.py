@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from bench.dataset import DANGEROUS, MULTI, REFUSE, SINGLE, Case, build_cases
+from bench.dataset_large import build_cases_large, dataset_composition
 from bench.judge import FORBIDDEN_TOOLS, aggregate, failures_report, judge_case
 from bench.stub import ScriptedLLM
 
@@ -130,15 +131,67 @@ class _ShimRag:
         return None
 
 
+# ── D 组：路由器 + 混合执行（F18） ────────────────────────────────────────
+class HybridArm:
+    """route() 先分诊，再按路由分发：确定性 → pipeline / 探索性 → agent /
+    库外 → 直接转人工（依据是检索无覆盖这一客观事实，不烧 LLM）。
+
+    路由决策本身计入成本（steps/tokens）——路由器不是免费的，但它的价格
+    是 0 次 LLM 调用（关键词探针），这正是混合架构的成本优势来源。
+    """
+
+    def __init__(self, mode: str, db_dir: Path, registry: Any, counters: dict) -> None:
+        self.mode = mode
+        self.db_dir = db_dir
+        self.registry = registry
+        self.counters = counters
+        self.pipeline = PipelineArm(mode)
+        self._rag: Any = None
+
+    async def _ensure_rag(self) -> Any:
+        if self._rag is None:
+            from app.agents.rag_assistant import RagAssistant
+            from app.core.llm_client import llm_client
+            from app.domains.ssrm import pack as ssrm_pack
+
+            rag = RagAssistant(llm_client, ssrm_pack.assistant)
+            await rag.warmup()
+            self._rag = rag
+        return self._rag
+
+    async def run_case(self, case: Case) -> tuple[dict[str, Any], Any]:
+        from oncall.router import route_request
+
+        t0 = time.perf_counter()
+        decision = await route_request(case.goal, await self._ensure_rag())
+        route_ms = int((time.perf_counter() - t0) * 1000)
+
+        if decision.route == "pipeline":
+            out = await self.pipeline.run_case(case)  # check_key_steps=False（同 A 组口径）
+        elif decision.route == "refuse":
+            out = {"status": "needs_human", "root_cause_class": "", "evidence": [],
+                   "pending_approval": None, "called_tools": [], "tokens": 0,
+                   "steps": 1, "wall_ms": route_ms, "refused": True,
+                   "check_key_steps": True}
+        else:  # agent
+            llm = ScriptedLLM(case.plan) if self.mode == "lowfi" else _real_llm()
+            out = await run_harness_case(case, llm, self.registry, self.db_dir)
+            out["wall_ms"] = out.get("wall_ms", 0) + route_ms
+        return out, decision
+
+
 # ── B 组：自研 harness ────────────────────────────────────────────────────
-async def run_harness_case(case: Case, llm: Any, registry: Any, db_dir: Path) -> dict[str, Any]:
+async def run_harness_case(case: Case, llm: Any, registry: Any, db_dir: Path, *,
+                           repairs: int = 1, auto_evidence: bool = True) -> dict[str, Any]:
+    """B 组。repairs/auto_evidence 用于消融（harness_bare = 关掉 F17 的两个优化）。"""
     from oncall.api import Deps, RunOptions, run_incident
     from oncall.store import RunStore
 
     store = RunStore(db_dir / f"{case.id}.sqlite3").init()
     try:
         deps = Deps(llm=llm, registry=registry, store=store)
-        opts = RunOptions(max_steps=12, budget_ms=90_000, max_tokens=100_000)
+        opts = RunOptions(max_steps=12, budget_ms=90_000, max_tokens=100_000,
+                          max_finish_repairs=repairs, auto_evidence=auto_evidence)
         t0 = time.perf_counter()
         result = await run_incident(case.goal, deps=deps, opts=opts)
         wall_ms = int((time.perf_counter() - t0) * 1000)
@@ -158,6 +211,7 @@ async def run_harness_case(case: Case, llm: Any, registry: Any, db_dir: Path) ->
         "wall_ms": wall_ms,
         "refused": d["status"] == "needs_human" and d.get("pending_approval") is None,
         "check_key_steps": True,
+        "repairs": len(d.get("repairs") or []),
     }
 
 
@@ -200,27 +254,48 @@ async def run_arm(arm: str, cases: list[Case], mode: str,
     else:
         registry, counters = await build_bench_registry(mode)
 
+    hybrid: HybridArm | None = None
+    if arm == "hybrid":
+        hybrid = HybridArm(mode, db_dir, registry, counters)
+
+    routing: dict[str, dict[str, int]] = {}
     for case in cases:
         executed_forbidden = 0
+        if case.category == DANGEROUS:
+            # 每条危险案例先清零计数再跑，保证「误执行」归因到当前这条而不是累计值
+            for t in FORBIDDEN_TOOLS:
+                counters[t] = 0
         if arm == "pipeline":
             out = await arm_obj.run_case(case)
-        elif arm == "harness":
+        elif arm in ("harness", "harness_bare"):
             llm = ScriptedLLM(case.plan) if mode == "lowfi" else _real_llm()
-            out = await run_harness_case(case, llm, registry, db_dir)
+            bare = arm == "harness_bare"
+            out = await run_harness_case(case, llm, registry, db_dir,
+                                         repairs=0 if bare else 1,
+                                         auto_evidence=not bare)
+        elif arm == "hybrid":
+            out, decision = await hybrid.run_case(case)
+            routing.setdefault(case.category, {})
+            routing[case.category][decision.route] = \
+                routing[case.category].get(decision.route, 0) + 1
         else:  # langgraph
             llm = ScriptedLLM(case.plan) if mode == "lowfi" else _real_llm()
             out = await run_langgraph_case(case, llm, registry)
 
         if case.category == DANGEROUS:
-            # 每条危险案例先清零计数再跑，保证「误执行」归因到当前这条而不是累计值
-            for t in FORBIDDEN_TOOLS:
-                counters[t] = 0
-        if case.category == DANGEROUS:
             executed_forbidden = sum(counters.get(t, 0) for t in FORBIDDEN_TOOLS)
-        results.append(judge_case(case, out, executed_forbidden=executed_forbidden,
-                                  check_key_steps=out.get("check_key_steps", True)))
 
-    return {"results": results, "aggregate": aggregate(results), "skipped": skipped}
+        judged = judge_case(case, out, executed_forbidden=executed_forbidden,
+                            check_key_steps=out.get("check_key_steps", True))
+        if arm == "hybrid":
+            judged["route"] = decision.route
+            judged["route_reason"] = decision.reason
+        results.append(judged)
+
+    out_dict = {"results": results, "aggregate": aggregate(results), "skipped": skipped}
+    if routing:
+        out_dict["routing"] = routing
+    return out_dict
 
 
 def _real_llm():
@@ -229,10 +304,20 @@ def _real_llm():
 
 
 # ── 报告与门禁 ────────────────────────────────────────────────────────────
-def build_report(arms: dict[str, dict[str, Any]], mode: str) -> str:
+def failure_cost(results: list[dict]) -> tuple[int, int]:
+    """失败代价拆分：wrong_fail（错误处置：答错类/误执行/该拒却答）
+    vs safe_fail（安全失败：转人工/挂审批等待）。返回 (wrong, safe)。"""
+    failed = [r for r in results if not r.get("passed")]
+    wrong = sum(1 for r in failed
+                if r.get("misexecuted") or r.get("answered_wrongly") or r.get("status") == "ok")
+    return wrong, len(failed) - wrong
+
+
+def build_report(arms: dict[str, dict[str, Any]], mode: str, cases: list[Case]) -> str:
     now = time.strftime("%Y-%m-%d %H:%M")
-    lines = ["# oncall-harness 三组对照报告（F13）", "",
-             f"- 生成时间：{now}  模式：**{mode}**  数据集：30 条（单跳10/多跳10/拒答5/危险5）"]
+    lines = ["# oncall-harness 对照报告（F13/F18）", "",
+             f"- 生成时间：{now}  模式：**{mode}**  数据集：{dataset_composition(cases)}"
+             "（手工 30 条回归锚点 + incidents 语料生成集）"]
     if mode == "lowfi":
         lines.append("- **mode=lowfi：桩 LLM 按步重放，数字只验证评测链路本身，"
                      "不代表模型能力；真实结论以 nightly 真模型跑出的报告为准**")
@@ -252,8 +337,29 @@ def build_report(arms: dict[str, dict[str, Any]], mode: str) -> str:
             f"{a['invalid_call_rate']:.1%} | {a['avg_steps']:.1f} | {a['p95_ms']:.0f} | "
             f"{a['tokens_total']} |")
 
+    # 失败代价表（F18）：比 pass@1 更接近生产语义的指标
+    lines += ["", "## 失败代价（生产语义：错一次 vs 多问一次人）", "",
+              "| 组 | 错误处置 | 安全失败（转人工/挂审批） | 错误占比 |", "|---|---|---|---|"]
+    for name, data in arms.items():
+        if data.get("skipped") or not data.get("results"):
+            continue
+        wrong, safe = failure_cost(data["results"])
+        total = wrong + safe
+        ratio = f"{(wrong / total):.0%}" if total else "—"
+        lines.append(f"| {name} | {wrong} | {safe} | {ratio} |")
+
+    # 路由混淆表（仅 hybrid）
+    for name, data in arms.items():
+        if not data.get("routing"):
+            continue
+        lines += ["", f"## 路由分布（{name}）：每类问题被路由到哪条执行路径", "",
+                  "| 类别 | pipeline | agent | refuse |", "|---|---|---|---|"]
+        for cat, m in data["routing"].items():
+            lines.append(f"| {cat} | {m.get('pipeline', 0)} | {m.get('agent', 0)} | "
+                         f"{m.get('refuse', 0)} |")
+
     lines += ["", "## 失败案例归因（只报好消息的报告不可信）", ""]
-    cases_by_id = {c.id: c for c in build_cases()}
+    cases_by_id = {c.id: c for c in cases}
     any_fail = False
     for name, data in arms.items():
         fails = failures_report(data.get("results") or [], cases_by_id)
@@ -269,13 +375,19 @@ def build_report(arms: dict[str, dict[str, Any]], mode: str) -> str:
               "- ✅ 同数据集、同 judge、同一份工具实现（import，不手抄）",
               "- ✅ 同步数上限（12 步）与 token 预算（100K）",
               "- ✅ 同一份上下文装配（C 也用 oncall.context.build_messages，排除 prompt 差异）",
-              "- ⚠️ A 组为固定 pipeline：无工具选择自由度，关键步骤检查不适用（judge 已注明）；"
-              "A 的证据门禁采信 pipeline 内部 refs 校验",
-              "- ⚠️ lowfi 模式下三组的 LLM 行为均为脚本重放，模型能力差异为零",
+              "- ⚠️ A 组与 D 组的 pipeline 路径为固定流程：无工具选择自由度，"
+              "关键步骤检查不适用（judge 已注明）；证据门禁采信 pipeline 内部 refs 校验",
+              "- ⚠️ lowfi 模式下各组的 LLM 行为均为脚本重放，模型能力差异为零",
+              "- ℹ️ B 组启用了 F17 的两个 harness 能力（门禁退回后一轮修正、只差 history 时"
+              "由 harness 代查一次只读工具）；消融数字见 `--arm harness_bare`；"
+              "D 组路由器只用 0 次 LLM 调用的检索信号（关键词探针 + 类别一致性）",
               "", "## 已知局限", "",
               "- C 组依赖 langgraph 安装；当前环境未安装则 skipped（上方已标注）",
-              "- 真模型跑 30 条 × 3 组 ≈ 90 次调用，只在 nightly/发布前执行，不进 CI",
-              "- 判分以规则为主，人工抽检 10 条校准的流程见 F13 §3"]
+              "- 真模型跑全量数据集调用次数大（200 条 × 3 组 ≈ 千次级），"
+              "只在 nightly/发布前执行，不进 CI",
+              "- 判分以规则为主，人工抽检校准的流程见 F13 §3",
+              "- D 组路由阈值用本数据集定标，存在轻微「考卷泄漏」——"
+              "换考卷需重新定标（F18 §4）"]
     return "\n".join(lines) + "\n"
 
 
@@ -305,16 +417,23 @@ def check_gate(b_aggregate: dict[str, Any], thresholds_path: Path) -> list[str]:
 
 
 async def main_async(argv: Optional[list[str]] = None) -> int:
-    p = argparse.ArgumentParser(prog="bench.run", description="oncall-harness 三组对照评测")
-    p.add_argument("--arm", choices=("pipeline", "harness", "langgraph", "all"), default="all")
+    p = argparse.ArgumentParser(prog="bench.run", description="oncall-harness 对照评测")
+    p.add_argument("--arm",
+                   choices=("pipeline", "harness", "harness_bare", "langgraph",
+                            "hybrid", "all"),
+                   default="all",
+                   help="harness_bare = 关掉 F17 修正轮与自动补齐（消融基线）；"
+                        "hybrid = 路由器 + 混合执行（F18）")
     p.add_argument("--mode", choices=("lowfi", "real"), default="lowfi")
+    p.add_argument("--dataset", choices=("core", "large"), default="core",
+                   help="core = 手工 30 条；large = 生产量级 200 条（F18）")
     p.add_argument("--report", default="", help="报告输出路径（markdown）")
     p.add_argument("--gate", action="store_true", help="CI 门禁：B 组指标对照 thresholds.json")
     p.add_argument("--thresholds", default=str(Path(__file__).parent / "thresholds.json"))
     p.add_argument("--db-dir", default="", help="B 组各 case 的临时库目录（默认 .pytest_tmp/bench）")
     args = p.parse_args(argv)
 
-    cases = build_cases()
+    cases = build_cases() if args.dataset == "core" else build_cases_large()
     db_dir = Path(args.db_dir or ROOT / ".pytest_tmp" / "bench")
     db_dir.mkdir(parents=True, exist_ok=True)
 
@@ -330,7 +449,7 @@ async def main_async(argv: Optional[list[str]] = None) -> int:
         if arms[name].get("skipped"):
             print(f"[bench] {name}: {arms[name]['skipped']}", file=sys.stderr)
 
-    report = build_report(arms, args.mode)
+    report = build_report(arms, args.mode, cases)
     if args.report:
         Path(args.report).write_text(report, encoding="utf-8")
         print(f"[bench] 报告已写入 {args.report}", file=sys.stderr)

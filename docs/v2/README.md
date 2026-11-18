@@ -49,6 +49,9 @@ v2 = **在同一个仓库里新增一层执行层（harness）**，把「一次�
 | F14 | 观测扩展（每步成本与 run 视图） | I4 | F02 | [F14-observability.md](F14-observability.md) |
 | F15 | 事故记忆 | I4 | F13 | [F15-memory.md](F15-memory.md) |
 | F16 | 入口分层与测试策略（贯穿） | I1~I4 | 全部 | [F16-testing.md](F16-testing.md) |
+| F17 | 门禁修正轮与确定性证据补齐（harness 层优化） | I5 | F07 F13 | [F17-harness-repair.md](F17-harness-repair.md) |
+| F18 | 路由器与混合架构（确定性判定 + 生产量级评测） | I6 | F13 F17 | [F18-router-hybrid.md](F18-router-hybrid.md) |
+| F18 补充 | 评测口径、v2 混合架构分层、确定性判定细节、评测集 2×2 设计四问详解 | I6 | F18 | [F18-eval-qa.md](F18-eval-qa.md) |
 
 ---
 
@@ -62,14 +65,19 @@ oncall/
   policy.py          # F05
   checkpoint.py      # F06
   sensors.py         # F07
+  observe.py         # F14（run 级指标 / trace）
+  memory.py          # F15（事故记忆）
   subagent.py        # F11
   tools.py           # F03（Thin adapter）
   mcp/client.py      # F08
   mcp/server.py      # F09
   skills_loader.py   # F10
 bench/
-  run.py             # F13：--arm pipeline|harness|langgraph
+  run.py             # F13：--arm pipeline|harness|harness_bare|langgraph|hybrid；--dataset core|large
   judge.py
+  dataset_large.py   # F18：200 条生产量级数据集（手工 30 回归锚点 + incidents 生成 170）
+  demo_trace.py      # F17：把一次排障的逐轮输入/输出录成 markdown
+oncall/router.py     # F18：路由器（风险预筛 → 覆盖探针 → 可选仲裁）
 experiments/langgraph_baseline/   # 基线 C，只被 bench import
 tests/test_architecture.py        # 依赖方向守卫
 ```
@@ -86,6 +94,7 @@ tests/test_architecture.py        # 依赖方向守卫
 | I2 ✅ | F04 F05 F06 F07 | 写操作挂起落库，`oncall approve` 后续跑；`oncall resume` 断点续跑 | 危险动作审批前执行 **0 次**（单测断言）；同审批重复执行 handler 仅 1 次（幂等键）；超时默认拒绝；destructive 双人确认；137 passed |
 | I3 ✅（F10/F11 未做） | F08 F09 F12 | `oncall serve` 被外部 client list+call 成功（子进程往返测试）；接两个同名 server 前缀不覆盖；多轮检索 `rag_search` 真模型 5 步跑通 | 外部 host list+call 成功（✅）；外部工具默认 WRITE、显式 trust 才降级（✅）；多跳集评测集已建（bench/dataset.py 30 条），真模型 nightly 已跑（见 I4 行） |
 | I4 ✅（F13/F14/F15） | F13 F14 F15 | `python -m bench.run --arm all --report bench/report.md` 一条命令出报告；`oncall trace/runs` 轨迹视图；事故记忆注入「历史同类」段 | 判分/门禁/报告全链路通（lowfi：B 100%、危险误执行 0、gate PASS）。**真模型 nightly 已跑（glm-4-flash，4 轮）**：B 23%、危险 100%+误执行 0、拒答 40%、C（装了 langgraph）23~27%、A 63%——归因与四轮修复记录见 bench/report-real.md；类名准确率受弱模型限制，S2 门禁把单源断言全部拦成转人工（安全兜底在工作）。CI 门禁已按实测校准为回归基线（thresholds.json）。F15 §7.1 重复事故步数下降待多次 nightly 累积记忆后再测 |
+| I5 ✅（F17） | F17 | `python -m bench.demo_trace --case SH-01` 逐轮录出「上一轮结果怎么进下一轮」；`--arm harness_bare` 出消融数字 | 门禁退回后有且只有一轮修正（`llm.calls == 2` 断言）；只差 history 时 harness 代查一次且**不代写 evidence**；关掉开关行为回到 I4；真模型 SH-01 从 needs_human → 3 轮 2 步 ok（docs/v2/example-trace.md） |
 
 ---
 

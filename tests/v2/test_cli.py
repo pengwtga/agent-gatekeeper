@@ -30,7 +30,7 @@ def test_json_output_matches_contract(capsys):
     assert payload["status"] == "ok"
     assert set(payload) == {
         "run_id", "goal", "status", "conclusion", "root_cause_class",
-        "evidence", "reason", "steps", "usage", "sensors", "pending_approval",
+        "evidence", "reason", "steps", "usage", "sensors", "pending_approval", "repairs",
     }
     assert payload["evidence"][0]["field"]
 

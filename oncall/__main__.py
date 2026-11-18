@@ -32,6 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="本次 run 的 token 总量上限（prompt+completion）")
         sp.add_argument("--json", action="store_true", help="输出结构化结果（给脚本/评测用）")
         sp.add_argument("--verbose", action="store_true", help="把每步的模型原始输出打到 stderr")
+        sp.add_argument("--repairs", type=int, default=1,
+                        help="finish 被门禁退回后给几轮修正（0=关闭，退回即转人工）")
+        sp.add_argument("--no-auto-evidence", action="store_true",
+                        help="关闭确定性证据补齐（只把门禁错误反馈给模型，不让 harness 代查）")
 
     ask = sub.add_parser("ask", help="一句话提问，跑一次排障")
     ask.add_argument("goal")
@@ -80,6 +84,9 @@ def _render_text(result) -> str:
         pa = o.pending_approval
         lines.append(f"待审批：{pa['tool']}({json.dumps(pa.get('args', {}), ensure_ascii=False)})"
                      f"  风险={pa.get('risk')}  需 {pa.get('requires')} 人确认")
+    if o.repairs:
+        filled = sum(1 for r in o.repairs if r.get("auto_filled"))
+        lines.append(f"门禁退回：{len(o.repairs)} 轮（其中 {filled} 轮由 harness 自动补齐 history）")
     if o.reason:
         lines.append(f"原因：{o.reason}")
     return "\n".join(lines)
@@ -128,7 +135,9 @@ async def _run(args: argparse.Namespace, deps_factory: DepsFactory) -> int:
         deps.observer = _echo
 
     opts = RunOptions(max_steps=args.max_steps, budget_ms=args.budget_ms,
-                      max_tokens=args.max_tokens, domain=args.domain)
+                      max_tokens=args.max_tokens, domain=args.domain,
+                      max_finish_repairs=args.repairs,
+                      auto_evidence=not args.no_auto_evidence)
     result = await run_incident(goal, deps=deps, opts=opts)
 
     if args.json:

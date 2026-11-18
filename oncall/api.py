@@ -37,6 +37,10 @@ class RunOptions:
     max_tokens: int = 100_000
     min_confidence: float = 0.7
     domain: str = "ssrm"
+    # F17：finish 被门禁退回后给几轮修正（0 = 关闭，退回即转人工，即 I4 之前的行为）
+    max_finish_repairs: int = 1
+    # F17：缺口只差 history 时，由 harness 确定性补一次 query_incidents（不放宽任何门禁）
+    auto_evidence: bool = True
 
 
 @dataclass
@@ -77,6 +81,7 @@ class RunResult:
             "usage": o.usage,
             "sensors": o.sensors,
             "pending_approval": o.pending_approval,
+            "repairs": o.repairs,
         }
 
 
@@ -103,6 +108,8 @@ async def run_incident(goal: str, *, deps: Deps, opts: Optional[RunOptions] = No
         budget_ms=opts.budget_ms,
         token_budget=opts.max_tokens,
         min_confidence=opts.min_confidence,
+        max_finish_repairs=opts.max_finish_repairs,
+        auto_evidence=opts.auto_evidence,
         observer=deps.observer,
         store=deps.store,
         memory_block=memory_block,
@@ -249,6 +256,8 @@ async def resume_incident(run_id: str, *, deps: Deps, opts: Optional[RunOptions]
         budget_ms=opts.budget_ms,
         token_budget=opts.max_tokens,
         min_confidence=opts.min_confidence,
+        max_finish_repairs=opts.max_finish_repairs,
+        auto_evidence=opts.auto_evidence,
         observer=deps.observer,
         store=store,
         start_i=start_i,

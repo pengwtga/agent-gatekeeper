@@ -333,7 +333,7 @@ def test_report_marks_lowfi(tmp_path, monkeypatch):
         return await run_arm("harness", cases, "lowfi", db_dir)
 
     out_b = asyncio.run(scenario())
-    report = build_report({"harness": out_b}, "lowfi")
+    report = build_report({"harness": out_b}, "lowfi", cases)
     assert "mode=lowfi" in report and "不代表模型能力" in report
     assert "公平性" in report
 
