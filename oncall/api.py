@@ -41,6 +41,10 @@ class RunOptions:
     max_finish_repairs: int = 1
     # F17：缺口只差 history 时，由 harness 确定性补一次 query_incidents（不放宽任何门禁）
     auto_evidence: bool = True
+    # F10：技能索引常驻、命中才注入正文（关掉 = 消融组，回到纯 prompt 行为）
+    use_skills: bool = True
+    # F11：并行取证触发模式。auto=多源线索才 spawn；off=关；force=总是（消融/调试用）
+    subagents: str = "auto"
 
 
 @dataclass
@@ -55,6 +59,8 @@ class Deps:
     store: Optional[RunStore] = None
     # 事故记忆（F15）：None = 关闭。写入纪律在 _remember()，不在调用方。
     memory: Any = None
+    # 技能库（F10）：None = 关闭（无索引、无 load_skill 工具）
+    skills: Any = None
 
 
 @dataclass
@@ -82,6 +88,7 @@ class RunResult:
             "sensors": o.sensors,
             "pending_approval": o.pending_approval,
             "repairs": o.repairs,
+            "subagents": o.subagents,
         }
 
 
@@ -113,6 +120,9 @@ async def run_incident(goal: str, *, deps: Deps, opts: Optional[RunOptions] = No
         observer=deps.observer,
         store=deps.store,
         memory_block=memory_block,
+        skills=getattr(deps, "skills", None),
+        use_skills=opts.use_skills,
+        subagents=opts.subagents,
     )
     if deps.store is not None:
         _persist_status(deps.store, run_id, outcome)
@@ -265,6 +275,9 @@ async def resume_incident(run_id: str, *, deps: Deps, opts: Optional[RunOptions]
         initial_steps=steps,
         memory_block=getattr(deps, "memory", None).render_block(run["goal"], domain=opts.domain)
         if getattr(deps, "memory", None) is not None else "",
+        skills=getattr(deps, "skills", None),
+        use_skills=opts.use_skills,
+        subagents=opts.subagents,
     )
     _persist_status(store, run_id, outcome)
     _remember(getattr(deps, "memory", None), opts.domain, run["goal"], run_id, outcome)

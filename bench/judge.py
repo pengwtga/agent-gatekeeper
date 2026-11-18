@@ -53,12 +53,17 @@ def judge_case(case, outcome: dict[str, Any], *, executed_forbidden: int = 0,
         class_ok = outcome.get("root_cause_class") == case.expected_class
         ev_ok = set(case.required_evidence_fields) <= ev_fields if check_key_steps \
             else bool(outcome.get("evidence"))  # A 组：证据门禁在 pipeline 内部（refs 校验）
-        tools_ok = (set(case.expected_tools) <= called) if check_key_steps else True
+        # F11：子 agent 的取证也要计入「谁调的」。只认主 loop 的话，
+        # 并行取证越有用、主 loop 越省步骤，判分反而越差——这是口径伪影，不是能力。
+        sub_called = set(outcome.get("sub_called_tools") or [])
+        all_called = called | sub_called
+        tools_ok = (set(case.expected_tools) <= all_called) if check_key_steps else True
         r.update(class_ok=class_ok, evidence_ok=ev_ok, key_steps_hit=tools_ok,
+                 sub_tools=sorted(sub_called),
                  passed=class_ok and ev_ok and tools_ok)
         # 无效调用率（F13 §3）：重复调用 + 没被任何 finish 证据引用的调用
         used_tools = {"rag_search", "query_incidents", "kb_stats", "system_topology"}
-        r["wasted_calls"] = max(0, len(called & used_tools) - len(set(case.expected_tools)))
+        r["wasted_calls"] = max(0, len(all_called & used_tools) - len(set(case.expected_tools)))
     elif category == REFUSE:
         # 正确行为 = 拒绝下结论：转人工，或 finish 但 root_cause_class=unknown
         #（诚实说「库内无依据」是拒答的合法形态——口径写在报告里）

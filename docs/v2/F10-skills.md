@@ -1,6 +1,25 @@
 # F10 Skill 运行时加载
 
-迭代：I3 ｜ 依赖：F04 ｜ 代码：`oncall/skills_loader.py`
+迭代：I3 ｜ 依赖：F04 ｜ 代码：`oncall/skills_loader.py` ｜ 状态：**已实现（I6 补齐）**
+
+## 0. 实现落点（先看这里）
+
+| 环节 | 实现 | 位置 |
+|---|---|---|
+| 扫描 + 解析 | `SkillBook.reload()`：`skills/*/SKILL.md`，极简 frontmatter（name/description/triggers） | `oncall/skills_loader.py` |
+| 常驻索引 | `index_text()`：每个 skill 一行，注入 `## 可用技能（匹配则先 load_skill 取正文）` | `oncall/context.py::build_messages` |
+| 隐式命中 | `match(goal)`：trigger 原样出现在 goal 里才算；并列第一 = 歧义 → **不加载** | `oncall/loop.py` 首轮前 |
+| 显式命中 | `load_skill(name)` 只读工具（走 F03 工具链：schema 校验 + 截断 + trace） | `register_skill_tool()` |
+| 触发轨迹 | `observer("skill", {"matched": [...]})`，CLI `--verbose` 可见 | `oncall/loop.py` |
+
+内置三个 skill：`incident-triage`（排障顺序）、`postmortem`（复盘六段）、
+`kb-entry`（入库五步，复用 v1 文档）。加 skill = 加目录 + md，**不改代码**。
+
+开关：`RunOptions.use_skills` / CLI `--no-skills` / 环境变量 `ONCALL_SKILLS=""`。
+
+实测（真模型，glm-4-flash）：`"为什么 EA 同步超时影响 Dora 门户"` 命中
+`incident-triage`，`[skill] {"matched": ["incident-triage"]}`；索引+正文合计
+约 700 字符，未命中时只多约 200 字符（三条索引行）。
 
 ## 1. 目标
 
@@ -97,6 +116,49 @@ SYSTEM_PROMPT 里常驻，要么根本不在。写死的问题：
 skill 是人写好的打法（知识）；记忆会变，skill 是显式维护的。两者都走
 「命中才注入」的渐进披露，但来源、可信度、治理方式完全不同。
 
-## 10. 面试一句话
+## 10. 怎么确认 agent 真的按 skill 走（不能不回答的问题）
+
+先把结论说清楚：**无法确认，只能度量 + 兜底。** skill 注入的是上下文，
+不是控制流——它没有任何强制力。任何声称「加载了 skill 所以模型会照做」的
+说法，在架构上都站不住。
+
+所以要把它拆成三个可验证的问题：
+
+| 问题 | 手段 | 现状 |
+|---|---|---|
+| 加载了吗 | observer 的 `skill` 事件（`{"matched": ["incident-triage"]}`）+ `--verbose` 输出 | ✅ 已有，能确认注入发生 |
+| 按流程走了吗 | 遵守率指标：命中 skill 的 case 上，统计 skill 声明的关键步骤（先 rag_search、再 query_incidents、顺序正确）出现率，与**未注入**的对照组比 | ✅ 已补（`bench/ab_subagents.py` 的「技能流程遵守率」段） |
+| 不照做会怎样 | 门禁是否覆盖 skill 里的每条「必须」 | ✅ 见下表，这是真正的兜底 |
+
+**关键设计原则：skill 里每一条「必须」，都必须有一条对应的机器门禁。**
+否则那条「必须」只是建议，模型可以无视。`incident-triage` 的三条硬要求
+与门禁的对应关系：
+
+| skill 写的 | 对应的门禁 | 不照做的后果 |
+|---|---|---|
+| 第 2 步必须查历史工单（第二来源） | S2 双源门禁（`sensors.check_finish`） | finish 被退回，进 F17 修正轮 |
+| `enough=false` 必须 unknown + 转人工 | S1 引用校验 + S3 类名合法性 | 类名不合法直接退回；unknown 才算合法拒答 |
+| 涉重启/删除/清空 → 停，交人工 | F05 策略门禁（WRITE 需审批） | 工具被拦成 pending_approval |
+
+只有一条没有强制：**「先 KB 再历史」的顺序**。这是刻意的——顺序错了
+不影响结论正确性（两个来源都有就过门禁），而强制顺序会把 skill 变成
+pipeline，失去它作为「打法」的意义。
+
+**所以 F10 的价值定位要诚实**：它影响的是**效率**（少走弯路），不是**正确性**
+（正确性由门禁保证）。实测数据（30 条多跳、真模型，见 `bench/report-ab-subagents.md`）：
+
+| 臂 | pass@1 | 步数 | token | 调过历史工单（第二来源） |
+|---|---|---|---|---|
+| 注入 skill | 20% | 1.8 | 194k | 3/3 |
+| 不注入 | 20% | 1.6 | 169k | **0/3** |
+
+行为确实变了（3/3 vs 0/3），但**结果没变**，还多花了 15% token。一个合理的
+解释是：F17 的确定性补齐会在模型不查 history 时替它查——**skill 教会模型
+自己做，harness 在它不做时替它做，两条路等价**，所以 pass@1 拉不开差距。
+样本只有 3 条命中，不足以下强结论；但它已经说明一件事：**skill 的收益
+要靠「harness 兜不了底」的任务来体现**（多轮、跨域、需要判断先后的场景），
+在单轮排障上它只是把同一件事换个地方做。
+
+## 11. 面试一句话
 
 「skill 的价值不是『存了一段 prompt』，而是『平时只花一行 token，命中才付全价』——这是它跟长 prompt 的唯一结构差别，也是它必须窄触发的原因。」

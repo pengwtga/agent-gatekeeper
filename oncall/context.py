@@ -30,6 +30,13 @@ SYSTEM_PROMPT = """你是 SSRM（供应商管理系统）值班团队的排障�
    （缺哪个来源就去查哪个工具），再重新 finish；**不要重复提交同一份结论**。
 9. 事实段每条写作 `- 工具名 = 内容（来源 …）`，evidence.field 按下表换算：
    rag_search→kb、query_incidents→history、system_topology→topology、kb_stats→stats。
+10. 事实段里 field=subagent 的行是并行取证小组的结论（每路只读、独立上下文）。
+   它可以帮你判断方向，但**不能直接当证据引用**——引用必须来自它下面带原始
+   field（kb/topology…）和 ref 的那几条事实，quote 用原文。
+11. 事实段出现 field=conflict 时：两路取证结论矛盾。**不要投票选一个**——
+   finish 且 root_cause_class=unknown，把冲突如实写进结论，交人工判断。
+12. 上下文有「## 可用技能」时：任务与某条描述匹配就先调 load_skill 取正文
+   （打法/流程），技能不产生证据，取证仍要用检索类工具。
 
 输出必须是 JSON，三选一：
 调工具：{"action":"tool","tool":"名称","args":{},"thought":"一句话：为什么查这个","confidence":0.7}
@@ -93,6 +100,8 @@ def build_messages(
     memory_block: str = "",
     class_catalog: str = "",
     feedback: str = "",
+    skill_index: str = "",
+    skill_block: str = "",
 ) -> tuple[str, str]:
     """返回 (system, user)。为什么不拼成一个字符串：v1 的 chat_json 就是双参数接口，
     且 system 稳定才有前缀缓存可吃。
@@ -106,16 +115,23 @@ def build_messages(
 
     feedback（F17）：上一次 finish 被验收传感器退回的原因 + 已做的自动补齐。
     放在最后一段——模型对上下文末尾的指令依从度最高，而这正是「必须马上修正」的指令。
+
+    skill_index / skill_block（F10）：索引常驻（每个 skill 一行，约 20 token），
+    正文只在命中时进上下文。技能段放最前：它决定「按什么流程查」，比事实更前置。
     """
     memory_section = f"## 历史同类\n{memory_block}\n\n" if memory_block else ""
     class_section = f"## 根因类别清单\n{class_catalog}\n\n" if class_catalog else ""
     feedback_section = f"## 上一轮被门禁退回\n{feedback}\n\n" if feedback else ""
+    skill_index_section = f"## 可用技能（匹配则先 load_skill 取正文）\n{skill_index}\n\n" if skill_index else ""
+    skill_body_section = f"## 已加载技能\n{skill_block}\n\n" if skill_block else ""
     payload = (
+        f"{skill_body_section}"
         f"## 任务\n{goal}\n\n"
         f"## 已确认事实\n{_facts_block(facts)}\n\n"
         f"{memory_section}"
         f"## 最近步骤\n{_steps_block(steps)}\n\n"
         f"{class_section}"
+        f"{skill_index_section}"
         f"{feedback_section}"
         f"## 工具清单\n{json.dumps(list(tool_specs), ensure_ascii=False)}\n"
     )

@@ -68,10 +68,12 @@ oncall/
   sensors.py         # F07
   observe.py         # F14（run 级指标 / trace）
   memory.py          # F15（事故记忆）
-  subagent.py        # F11
+  subagent.py        # F11（并行取证：只读线路 + 结构化 Finding + 冲突检测）
+  skills_loader.py   # F10（扫描 → 索引 → 命中 → 注入；load_skill 只读工具）
   tools.py           # F03（Thin adapter）
   mcp/client.py      # F08
   mcp/server.py      # F09
+skills/              # F10：incident-triage / postmortem / kb-entry（加目录即生效）
   skills_loader.py   # F10
 bench/
   run.py             # F13：--arm pipeline|harness|harness_bare|langgraph|hybrid；--dataset core|large
@@ -93,9 +95,11 @@ tests/test_architecture.py        # 依赖方向守卫
 |---|---|---|---|
 | I1 | F01 F02 F03 | `oncall ask "XF-885 注册卡单"` 出带证据结论 | 10 条单跳 pass@1 ≥【待实测】；平均步数 ≤ 6 |
 | I2 ✅ | F04 F05 F06 F07 | 写操作挂起落库，`oncall approve` 后续跑；`oncall resume` 断点续跑 | 危险动作审批前执行 **0 次**（单测断言）；同审批重复执行 handler 仅 1 次（幂等键）；超时默认拒绝；destructive 双人确认；137 passed |
-| I3 ✅（F10/F11 未做） | F08 F09 F12 | `oncall serve` 被外部 client list+call 成功（子进程往返测试）；接两个同名 server 前缀不覆盖；多轮检索 `rag_search` 真模型 5 步跑通 | 外部 host list+call 成功（✅）；外部工具默认 WRITE、显式 trust 才降级（✅）；多跳集评测集已建（bench/dataset.py 30 条），真模型 nightly 已跑（见 I4 行） |
+| I3 ✅ | F08 F09 F12 | `oncall serve` 被外部 client list+call 成功（子进程往返测试）；接两个同名 server 前缀不覆盖；多轮检索 `rag_search` 真模型 5 步跑通 | 外部 host list+call 成功（✅）；外部工具默认 WRITE、显式 trust 才降级（✅）；多跳集评测集已建（bench/dataset.py 30 条），真模型 nightly 已跑（见 I4 行） |
 | I4 ✅（F13/F14/F15） | F13 F14 F15 | `python -m bench.run --arm all --report bench/report.md` 一条命令出报告；`oncall trace/runs` 轨迹视图；事故记忆注入「历史同类」段 | 判分/门禁/报告全链路通（lowfi：B 100%、危险误执行 0、gate PASS）。**真模型 nightly 已跑（glm-4-flash，4 轮）**：B 23%、危险 100%+误执行 0、拒答 40%、C（装了 langgraph）23~27%、A 63%——归因与四轮修复记录见 bench/report-real.md；类名准确率受弱模型限制，S2 门禁把单源断言全部拦成转人工（安全兜底在工作）。CI 门禁已按实测校准为回归基线（thresholds.json）。F15 §7.1 重复事故步数下降待多次 nightly 累积记忆后再测 |
 | I5 ✅（F17） | F17 | `python -m bench.demo_trace --case SH-01` 逐轮录出「上一轮结果怎么进下一轮」；`--arm harness_bare` 出消融数字 | 门禁退回后有且只有一轮修正（`llm.calls == 2` 断言）；只差 history 时 harness 代查一次且**不代写 evidence**；关掉开关行为回到 I4；真模型 SH-01 从 needs_human → 3 轮 2 步 ok（docs/v2/example-trace.md） |
+| I6 ✅（F18） | F18 | `--arm hybrid --dataset large` 一条命令出混合架构对照；路由分布表 + 失败代价表 | 路由自检：单跳 90/90、危险 30/30；真模型 200 条：hybrid 86% vs pipeline 70% vs harness 53%，错误处置 22 vs 45；`F18-eval-qa.md` 四问详解 |
+| I7 ✅（F10/F11 补齐） | F10 F11 | `oncall ask "为什么…影响面多大" --verbose` 能看到 `[skill]` 命中与 `[subagent]` 两路结论；bench `--subagents force` 出消融 | 加 skill 不改代码即命中（单测）；未命中只付索引一行；子 agent 拿不到写工具（机制断言）、两路并行（80ms×2 < 150ms）、冲突不投票（禁断言根因）、单路超时/重复调用不拖垮整组；全量 207 passed |
 
 ---
 

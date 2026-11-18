@@ -20,8 +20,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from bench.dataset import (DANGEROUS, MULTI, REFUSE, SINGLE, Case,
-                           _danger, _finish, _inc, _qinc, _rag)
+from bench.dataset import DANGEROUS, MULTI, REFUSE, SINGLE, Case, _danger, _finish, _inc, _qinc, _rag
 
 _DATA = Path(__file__).resolve().parent.parent / "data" / "ssrm" / "incidents.jsonl"
 

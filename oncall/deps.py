@@ -71,9 +71,21 @@ async def build_serve_registry(domain: str = "ssrm"):
     return await build_registry(domain, require_llm=False)
 
 
+def build_skill_book():
+    """技能库（F10）。ONCALL_SKILLS 可覆盖目录；空串 = 显式关闭。"""
+    from oncall.skills_loader import build_skill_book as _build
+
+    path = os.environ.get("ONCALL_SKILLS", "skills")
+    return None if path == "" else _build(path)
+
+
 async def build_default_deps(domain: str = "ssrm") -> Deps:
     from app.core.llm_client import llm_client
+    from oncall.skills_loader import register_skill_tool
 
     registry = await build_registry(domain)
+    skills = build_skill_book()
+    if skills is not None:
+        register_skill_tool(registry, skills)  # F10：显式加载通道（只读取文本）
     return Deps(llm=llm_client, registry=registry, store=build_store(),
-                memory=build_memory())
+                memory=build_memory(), skills=skills)

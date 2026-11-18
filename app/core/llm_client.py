@@ -325,7 +325,16 @@ class LLMClient:
                 "outcome": "ok",
             },
         )
-        return _extract_json(content, provider=provider.name)
+        out = _extract_json(content, provider=provider.name)
+        # 把本次调用自己的用量挂回结果：loop 的 token 记账读的就是这个字段。
+        # 之前只记了进程级累计（_usage 计数器），结果是所有报告的 token 列恒为 0——
+        # 「并行取证多花多少钱」这类问题因此无法回答，属于口径缺陷而非展示问题。
+        if isinstance(out, dict):
+            out["_usage"] = {
+                "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+                "completion_tokens": int(usage.get("completion_tokens") or 0),
+            }
+        return out
 
     # ── 成本可见：token 计数（进程级，多 worker 需换 Prometheus 计数器）──
     def _record_usage(self, provider: Provider, usage: Optional[dict[str, Any]]) -> None:

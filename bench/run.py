@@ -32,6 +32,18 @@ from bench.stub import ScriptedLLM
 ROOT = Path(__file__).resolve().parent.parent
 PROMPT_PREFIX = "你是 SSRM 值班排障助手。"
 
+# F10：技能库进程内只扫一次（IO 一次，之后只读内存）
+_SKILL_BOOK: Any = None
+
+
+def skill_book() -> Any:
+    global _SKILL_BOOK
+    if _SKILL_BOOK is None:
+        from oncall.skills_loader import build_skill_book
+
+        _SKILL_BOOK = build_skill_book(ROOT / "skills")
+    return _SKILL_BOOK
+
 
 # ── 工具注册表（三组共用同一份实现） ──────────────────────────────────────
 async def build_bench_registry(mode: str):
@@ -60,6 +72,12 @@ async def build_bench_registry(mode: str):
             params={"target": {"type": "string", "description": "作用对象", "required": True}},
             handler=_make_handler(name),
         ))
+    if mode == "real":
+        from oncall.skills_loader import register_skill_tool
+
+        book = skill_book()
+        if book is not None:
+            register_skill_tool(registry, book)  # F10：显式加载通道（真模型才用得上）
     return registry, counters
 
 
@@ -140,11 +158,13 @@ class HybridArm:
     是 0 次 LLM 调用（关键词探针），这正是混合架构的成本优势来源。
     """
 
-    def __init__(self, mode: str, db_dir: Path, registry: Any, counters: dict) -> None:
+    def __init__(self, mode: str, db_dir: Path, registry: Any, counters: dict,
+                 subagents: str = "off") -> None:
         self.mode = mode
         self.db_dir = db_dir
         self.registry = registry
         self.counters = counters
+        self.subagents = "off" if mode == "lowfi" else subagents
         self.pipeline = PipelineArm(mode)
         self._rag: Any = None
 
@@ -175,23 +195,31 @@ class HybridArm:
                    "check_key_steps": True}
         else:  # agent
             llm = ScriptedLLM(case.plan) if self.mode == "lowfi" else _real_llm()
-            out = await run_harness_case(case, llm, self.registry, self.db_dir)
+            out = await run_harness_case(case, llm, self.registry, self.db_dir,
+                                         subagents=self.subagents)
             out["wall_ms"] = out.get("wall_ms", 0) + route_ms
         return out, decision
 
 
 # ── B 组：自研 harness ────────────────────────────────────────────────────
 async def run_harness_case(case: Case, llm: Any, registry: Any, db_dir: Path, *,
-                           repairs: int = 1, auto_evidence: bool = True) -> dict[str, Any]:
-    """B 组。repairs/auto_evidence 用于消融（harness_bare = 关掉 F17 的两个优化）。"""
+                           repairs: int = 1, auto_evidence: bool = True,
+                           subagents: str = "off", use_skills: bool = True) -> dict[str, Any]:
+    """B 组。repairs/auto_evidence 用于消融（harness_bare = 关掉 F17 的两个优化）。
+
+    lowfi 必须 subagents=off：桩 LLM 是按步重放的脚本，并行子 agent 会把
+    脚本序列吃掉，重放就对不上了——桩模式验的是链路，不是并发本身。
+    """
     from oncall.api import Deps, RunOptions, run_incident
     from oncall.store import RunStore
 
     store = RunStore(db_dir / f"{case.id}.sqlite3").init()
     try:
-        deps = Deps(llm=llm, registry=registry, store=store)
+        deps = Deps(llm=llm, registry=registry, store=store,
+                    skills=skill_book() if use_skills else None)
         opts = RunOptions(max_steps=12, budget_ms=90_000, max_tokens=100_000,
-                          max_finish_repairs=repairs, auto_evidence=auto_evidence)
+                          max_finish_repairs=repairs, auto_evidence=auto_evidence,
+                          subagents=subagents, use_skills=use_skills)
         t0 = time.perf_counter()
         result = await run_incident(case.goal, deps=deps, opts=opts)
         wall_ms = int((time.perf_counter() - t0) * 1000)
@@ -200,6 +228,8 @@ async def run_harness_case(case: Case, llm: Any, registry: Any, db_dir: Path, *,
 
     d = result.to_dict()
     u = d.get("usage") or {}
+    sub_called = [s.get("tool") for f in d.get("subagents") or []
+                  for s in f.get("steps") or [] if s.get("ok")]
     return {
         "status": d["status"],
         "root_cause_class": d["root_cause_class"],
@@ -212,6 +242,10 @@ async def run_harness_case(case: Case, llm: Any, registry: Any, db_dir: Path, *,
         "refused": d["status"] == "needs_human" and d.get("pending_approval") is None,
         "check_key_steps": True,
         "repairs": len(d.get("repairs") or []),
+        "subagents": len(d.get("subagents") or []),
+        # F11 的取证是「子 agent 调的工具」，主 loop 的 steps 里看不见。
+        # 不合并进判分就相当于：子 agent 代劳了，judge 判它没做——口径伪影。
+        "sub_called_tools": [t for t in sub_called if t],
     }
 
 
@@ -233,8 +267,12 @@ async def run_langgraph_case(case: Case, llm: Any, registry: Any) -> dict[str, A
 
 # ── 编排 ──────────────────────────────────────────────────────────────────
 async def run_arm(arm: str, cases: list[Case], mode: str,
-                  db_dir: Path) -> dict[str, Any]:
-    """跑一组，返回 {results, aggregate, skipped}。skipped 非空表示该组未真正执行。"""
+                  db_dir: Path, subagents: str = "off") -> dict[str, Any]:
+    """跑一组，返回 {results, aggregate, skipped}。skipped 非空表示该组未真正执行。
+
+    subagents（F11）默认关闭：并行取证会改变 token/延迟与轨迹，打开它应该是
+    一次**显式的消融**，而不是让历史数字在无人察觉时漂移。
+    """
     results: list[dict[str, Any]] = []
     skipped = ""
 
@@ -256,7 +294,7 @@ async def run_arm(arm: str, cases: list[Case], mode: str,
 
     hybrid: HybridArm | None = None
     if arm == "hybrid":
-        hybrid = HybridArm(mode, db_dir, registry, counters)
+        hybrid = HybridArm(mode, db_dir, registry, counters, subagents=subagents)
 
     routing: dict[str, dict[str, int]] = {}
     for case in cases:
@@ -272,7 +310,8 @@ async def run_arm(arm: str, cases: list[Case], mode: str,
             bare = arm == "harness_bare"
             out = await run_harness_case(case, llm, registry, db_dir,
                                          repairs=0 if bare else 1,
-                                         auto_evidence=not bare)
+                                         auto_evidence=not bare,
+                                         subagents="off" if (bare or mode == "lowfi") else subagents)
         elif arm == "hybrid":
             out, decision = await hybrid.run_case(case)
             routing.setdefault(case.category, {})
@@ -431,6 +470,8 @@ async def main_async(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--gate", action="store_true", help="CI 门禁：B 组指标对照 thresholds.json")
     p.add_argument("--thresholds", default=str(Path(__file__).parent / "thresholds.json"))
     p.add_argument("--db-dir", default="", help="B 组各 case 的临时库目录（默认 .pytest_tmp/bench）")
+    p.add_argument("--subagents", choices=("auto", "off", "force"), default="off",
+                   help="F11 并行取证开关（默认 off：打开它是一次显式消融，不让历史数字漂移）")
     args = p.parse_args(argv)
 
     cases = build_cases() if args.dataset == "core" else build_cases_large()
@@ -441,7 +482,7 @@ async def main_async(argv: Optional[list[str]] = None) -> int:
     arms: dict[str, dict[str, Any]] = {}
     for name in arm_names:
         print(f"[bench] 运行 {name}（mode={args.mode}，n={len(cases)}）…", file=sys.stderr)
-        arms[name] = await run_arm(name, cases, args.mode, db_dir)
+        arms[name] = await run_arm(name, cases, args.mode, db_dir, subagents=args.subagents)
         a = arms[name].get("aggregate")
         if a:
             print(f"[bench] {name}: pass@1={a['pass@1']:.0%}  "

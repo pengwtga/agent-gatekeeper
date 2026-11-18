@@ -36,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="finish 被门禁退回后给几轮修正（0=关闭，退回即转人工）")
         sp.add_argument("--no-auto-evidence", action="store_true",
                         help="关闭确定性证据补齐（只把门禁错误反馈给模型，不让 harness 代查）")
+        sp.add_argument("--no-skills", action="store_true",
+                        help="关闭技能库（不注入索引，也不注册 load_skill）")
+        sp.add_argument("--subagents", choices=("auto", "off", "force"), default="auto",
+                        help="并行取证触发：auto=多源线索才 spawn；off=关；force=总是")
 
     ask = sub.add_parser("ask", help="一句话提问，跑一次排障")
     ask.add_argument("goal")
@@ -87,6 +91,10 @@ def _render_text(result) -> str:
     if o.repairs:
         filled = sum(1 for r in o.repairs if r.get("auto_filled"))
         lines.append(f"门禁退回：{len(o.repairs)} 轮（其中 {filled} 轮由 harness 自动补齐 history）")
+    if o.subagents:
+        ok = sum(1 for s in o.subagents if s.get("summary") and not s.get("error"))
+        lines.append(f"并行取证：{len(o.subagents)} 路（{ok} 路有结论）"
+                     + ("，存在冲突" if any(f.get("field") == "conflict" for f in o.facts) else ""))
     if o.reason:
         lines.append(f"原因：{o.reason}")
     return "\n".join(lines)
@@ -137,7 +145,9 @@ async def _run(args: argparse.Namespace, deps_factory: DepsFactory) -> int:
     opts = RunOptions(max_steps=args.max_steps, budget_ms=args.budget_ms,
                       max_tokens=args.max_tokens, domain=args.domain,
                       max_finish_repairs=args.repairs,
-                      auto_evidence=not args.no_auto_evidence)
+                      auto_evidence=not args.no_auto_evidence,
+                      use_skills=not args.no_skills,
+                      subagents=args.subagents)
     result = await run_incident(goal, deps=deps, opts=opts)
 
     if args.json:

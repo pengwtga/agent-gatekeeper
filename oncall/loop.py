@@ -21,6 +21,7 @@ from oncall.clock import Clock
 from oncall.context import build_messages, default_class_catalog
 from oncall.policy import ALLOW, APPROVAL, decide
 from oncall.sensors import check_finish
+from oncall.subagent import gather_evidence, should_spawn
 from oncall.tools import (
     SideEffect,
     ToolCallRecord,
@@ -53,6 +54,8 @@ class Outcome:
     usage: dict = field(default_factory=dict)
     # F17：每次 finish 被门禁退回的记录（第几轮、错在哪、是否做了确定性补齐）
     repairs: list[dict] = field(default_factory=list)
+    # F11：并行取证小组的结论（每路一行；不进 steps，避免与 checkpoints 的 (run_id,i) 冲突）
+    subagents: list[dict] = field(default_factory=list)
 
 
 def _fingerprint(name: str, args: dict) -> str:
@@ -126,6 +129,9 @@ async def run_loop(
     initial_facts: Optional[list[dict]] = None,
     initial_steps: Optional[list[ToolCallRecord]] = None,
     memory_block: str = "",
+    skills: Any = None,
+    use_skills: bool = True,
+    subagents: str = "auto",
 ) -> Outcome:
     """store 传入时每步落库（F06 checkpoint）；initial_* 由 resume 重建状态。
 
@@ -192,15 +198,50 @@ async def run_loop(
     if store is not None:
         store.ensure_run(run_id, goal)
 
+    # ── F10：技能索引常驻 + 命中才注入正文（渐进披露）──
+    skill_index = ""
+    skill_block = ""
+    if use_skills and skills is not None:
+        try:
+            skill_index = skills.index_text()
+            matched = skills.match(goal)
+            if matched:
+                skill_block = skills.body_block(matched)
+                if observer:
+                    observer("skill", {"matched": [s.name for s in matched]})
+        except Exception:  # noqa: BLE001 —— 技能是增强，坏了不许拖垮排障
+            skill_index = ""
+
+    # ── F11：首轮并行取证（只在 fresh run 且判定值得并行时）──
+    sub_records: list[dict] = []
+    conflicts: list[str] = []
+    if subagents in ("auto", "force") and not initial_facts \
+            and should_spawn(goal, registry, subagents):
+        gathered = await gather_evidence(goal, llm=llm, registry=registry,
+                                         run_id=run_id, budget=budget, observer=observer)
+        if gathered.findings:
+            facts.extend(gathered.facts)
+            sub_records = [f.to_dict() for f in gathered.findings]
+            conflicts = gathered.conflicts
+            tokens["prompt"] += int(gathered.usage.get("prompt") or 0)
+            tokens["completion"] += int(gathered.usage.get("completion") or 0)
+            budget.add_usage(int(gathered.usage.get("prompt") or 0),
+                             int(gathered.usage.get("completion") or 0))
+            if store is not None:
+                store.checkpoint(run_id, steps, facts)
+
     for i in range(start_i, start_i + max_steps):
         if budget.exhausted() or budget.token_exhausted():
             return _wrap(BUDGET_EXHAUSTED, steps, facts, started, clock, tokens,
-                         reason=_budget_reason(budget, budget_ms, i), repairs=repairs)
+                         reason=_budget_reason(budget, budget_ms, i), repairs=repairs,
+                         subagents=sub_records)
 
         system, user = build_messages(goal, facts, steps, tool_specs,
                                       memory_block=memory_block,
                                       class_catalog=default_class_catalog(),
-                                      feedback=feedback)
+                                      feedback=feedback,
+                                      skill_index=skill_index,
+                                      skill_block=skill_block)
         feedback = ""  # 反馈只喂一轮：模型没有据此改，就是它改不动，继续留着只会污染上下文
         try:
             # RunBudget 与 v1 Budget 的接口同名（remaining_ms/slice/exhausted），
@@ -208,7 +249,8 @@ async def run_loop(
             out = await llm.chat_json(system, user, budget=budget)
         except Exception as exc:  # noqa: BLE001 —— 容灾链全挂才会到这里
             return _wrap(FAILED, steps, facts, started, clock, tokens,
-                         reason=f"LLM 调用失败: {type(exc).__name__}: {exc}", repairs=repairs)
+                         reason=f"LLM 调用失败: {type(exc).__name__}: {exc}", repairs=repairs,
+                         subagents=sub_records)
 
         usage = out.get("_usage") if isinstance(out, dict) else None
         if isinstance(usage, dict):
@@ -222,7 +264,15 @@ async def run_loop(
 
         action = _action_of(out)
         if action == "finish":
-            verdict = _finish(out, steps, facts, started, clock, tokens, repairs=repairs)
+            verdict = _finish(out, steps, facts, started, clock, tokens, repairs=repairs,
+                              subagents=sub_records)
+            # F11：两路取证结论矛盾时不允许断言根因——矛盾本身是信息，投票是掩盖
+            if conflicts and verdict.root_cause_class not in ("", "unknown"):
+                msg = "取证冲突未解决，不允许断言根因（" + conflicts[0] + "）"
+                verdict.status = NEEDS_HUMAN
+                verdict.sensors = dict(verdict.sensors or {})
+                verdict.sensors.setdefault("errors", []).append(msg)
+                verdict.reason = (verdict.reason + "；" if verdict.reason else "") + msg
             errors = "；".join(verdict.sensors.get("errors") or []) or verdict.reason
             fields = set(verdict.sensors.get("evidence_fields") or [])
             # 补齐与反馈是**两个独立预算**：补齐是确定性动作（成本固定、只做一次），
@@ -261,13 +311,15 @@ async def run_loop(
             continue
         if action == "ask_human":
             return _wrap(NEEDS_HUMAN, steps, facts, started, clock, tokens,
-                         reason=str(out.get("reason") or "模型主动转人工"), repairs=repairs)
+                         reason=str(out.get("reason") or "模型主动转人工"), repairs=repairs,
+                         subagents=sub_records)
 
         name = str(out.get("tool") or "").strip()
         args = out.get("args") if isinstance(out.get("args"), dict) else {}
         if not name:
             return _wrap(NEEDS_HUMAN, steps, facts, started, clock, tokens,
-                         reason="模型没有给出工具名", repairs=repairs)
+                         reason="模型没有给出工具名", repairs=repairs,
+                         subagents=sub_records)
 
         fp = _fingerprint(name, args)
         if fp in seen:
@@ -276,7 +328,7 @@ async def run_loop(
             if repeats >= MAX_REPEATS:
                 return _wrap(NEEDS_HUMAN, steps, facts, started, clock, tokens,
                              reason=f"无进展：连续 {repeats + 1} 次调用 {name} 且参数相同",
-                             repairs=repairs)
+                             repairs=repairs, subagents=sub_records)
         else:
             seen.add(fp)
             repeats = 0
@@ -309,6 +361,7 @@ async def run_loop(
                         "requires": decision.requires,
                     },
                     repairs=repairs,
+                    subagents=sub_records,
                 )
             if decision.kind != ALLOW:
                 record.skipped = "denied"
@@ -332,7 +385,8 @@ async def run_loop(
                 observer("tool", record.to_dict())
 
     return _wrap(BUDGET_EXHAUSTED, steps, facts, started, clock, tokens,
-                 reason=f"步数用完（{max_steps} 步）", repairs=repairs)
+                 reason=f"步数用完（{max_steps} 步）", repairs=repairs,
+                 subagents=sub_records)
 
 
 def _budget_reason(budget: RunBudget, budget_ms: int, step: int) -> str:
@@ -354,7 +408,8 @@ def _action_of(out: dict) -> str:
     return "ask_human"
 
 
-def _finish(out: dict, steps, facts, started, clock, tokens, *, repairs=None) -> Outcome:
+def _finish(out: dict, steps, facts, started, clock, tokens, *, repairs=None,
+            subagents=None) -> Outcome:
     evidence = out.get("evidence") if isinstance(out.get("evidence"), list) else []
     root_cause_class = str(out.get("root_cause_class") or "unknown")
     report = check_finish(str(out.get("conclusion") or ""), evidence,
@@ -368,12 +423,14 @@ def _finish(out: dict, steps, facts, started, clock, tokens, *, repairs=None) ->
         reason="" if report.ok else "；".join(report.errors),
         sensors=report.to_dict(),
         repairs=repairs,
+        subagents=subagents,
     )
 
 
 def _wrap(status, steps, facts, started, clock, tokens, *,
           conclusion="", root_cause_class="unknown", evidence=None,
-          reason="", sensors=None, pending=None, repairs=None) -> Outcome:
+          reason="", sensors=None, pending=None, repairs=None,
+          subagents=None) -> Outcome:
     return Outcome(
         status=status,
         conclusion=conclusion,
@@ -392,4 +449,5 @@ def _wrap(status, steps, facts, started, clock, tokens, *,
             "completion_tokens": tokens["completion"],
         },
         repairs=list(repairs or []),
+        subagents=list(subagents or []),
     )

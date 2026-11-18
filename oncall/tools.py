@@ -38,11 +38,18 @@ SIDE_EFFECTS: dict[str, SideEffect] = {
     "query_incidents": SideEffect.READ,
     "system_topology": SideEffect.READ,
     "rag_search": SideEffect.READ,  # F12：只读检索（多轮改写在工具内部，不占主 loop 步数）
+    "load_skill": SideEffect.READ,  # F10：读取技能正文，不产生任何副作用
 }
 
 # 幂等声明：重放（resume）时，只有幂等的写操作可以直接重做
 IDEMPOTENT: dict[str, bool] = {
     "add_ticket_comment": True,
+}
+
+# 单工具截断上限覆盖：load_skill 返回的是「打法正文」，砍掉一半就没有执行价值，
+# 所以给它单独一档。其余工具仍用默认 800——证据引用不该依赖长文本。
+MAX_RESULT_OVERRIDES: dict[str, int] = {
+    "load_skill": 3000,
 }
 
 
@@ -77,11 +84,14 @@ def specs_for_prompt(registry: ToolRegistry) -> list[dict]:
     return registry.specs()
 
 
-def _truncate(text: str) -> tuple[str, bool]:
-    if len(text) <= MAX_RESULT_CHARS:
+def _truncate(text: str, limit: int = MAX_RESULT_CHARS) -> tuple[str, bool]:
+    if len(text) <= limit:
         return text, False
-    omitted = len(text) - _HEAD - _TAIL
-    return f"{text[:_HEAD]}\n…省略 {omitted} 字符…\n{text[-_TAIL:]}", True
+    # 上限太小（<700）时按比例切，避免 head+tail 超过 limit
+    head = min(_HEAD, limit - 100)
+    tail = min(_TAIL, max(0, limit - head - 40))
+    omitted = len(text) - head - tail
+    return f"{text[:head]}\n…省略 {omitted} 字符…\n{text[-tail:] if tail else ''}", True
 
 
 def _render(value: Any) -> str:
@@ -120,7 +130,7 @@ async def call_tool(
         return ToolResult(ok=False, error=f"执行失败: {type(exc).__name__}: {exc}",
                           ms=int((time.perf_counter() - started) * 1000))
 
-    text, truncated = _truncate(_render(value))
+    text, truncated = _truncate(_render(value), MAX_RESULT_OVERRIDES.get(name, MAX_RESULT_CHARS))
     return ToolResult(
         ok=True,
         value=text if truncated else value,
